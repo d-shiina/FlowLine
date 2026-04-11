@@ -9,6 +9,7 @@ import {
 } from './layout';
 import { useScenario, uid } from './useScenario';
 import { useTheme } from './useTheme';
+import { useExecution } from './engine';
 import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Titlebar } from './components/Titlebar';
@@ -22,6 +23,7 @@ import { SamplesModal } from './components/SamplesModal';
 import { GraphEdges } from './components/GraphEdges';
 import { SubroutineSidebar } from './components/SubroutineSidebar';
 import { Inspector } from './components/Inspector';
+import { ExecutionLogPanel } from './components/ExecutionLogPanel';
 
 /**
  * Root application. Owns scenario state, playback, selection, and modals.
@@ -69,10 +71,11 @@ export default function App() {
       }
     : null;
 
-  // ─── playback ──────────────────────────────────────────────────────
-  const [playing, setPlaying] = useState(false);
-  const [playhead, setPlayhead] = useState(-1); // slot index, -1 = idle
-  const playRef = useRef<number | null>(null);
+  // ─── execution engine ──────────────────────────────────────────────
+  const execution = useExecution();
+  const playing = execution.running;
+  const blockStatus = execution.state.status;
+  const currentSlotByTrack = execution.state.currentSlot;
 
   const totalSlots = useMemo(() => {
     let max = MIN_SLOTS;
@@ -94,37 +97,16 @@ export default function App() {
     return max;
   }, [scenario, editorMode, activeSubroutine]);
 
-  const togglePlay = () => {
-    if (playing) {
-      if (playRef.current !== null) window.clearInterval(playRef.current);
-      playRef.current = null;
-      setPlaying(false);
-      setPlayhead(-1);
+  const togglePlay = useCallback(() => {
+    if (execution.running) {
+      execution.abort();
       return;
     }
-    setPlaying(true);
-    let t = 0;
-    setPlayhead(0);
-    playRef.current = window.setInterval(() => {
-      t += 0.2;
-      const slot = parseFloat(t.toFixed(1));
-      setPlayhead(slot);
-      if (slot >= totalSlots) {
-        if (playRef.current !== null) window.clearInterval(playRef.current);
-        playRef.current = null;
-        window.setTimeout(() => {
-          setPlaying(false);
-          setPlayhead(-1);
-        }, 400);
-      }
-    }, 120);
-  };
-  useEffect(
-    () => () => {
-      if (playRef.current !== null) window.clearInterval(playRef.current);
-    },
-    [],
-  );
+    // Starting a fresh run — clear stale statuses/logs from the previous
+    // run so the UI doesn't show leftover colors.
+    execution.clear();
+    execution.start(scenario);
+  }, [execution, scenario]);
 
   // ─── mode + modals ─────────────────────────────────────────────────
   const [mode, setModeState] = useState<EditMode>('block');
@@ -420,9 +402,20 @@ export default function App() {
 
   // ─── render ────────────────────────────────────────────────────────
   const canvasWidth = totalSlots * SLOT_PX + HEADER_W;
-  // Sync points and playhead line span regular tracks only — not the
-  // error handler, which runs separately on abort.
+  // Sync overlay spans regular tracks only — not the error handler,
+  // which runs separately on abort.
   const regularTrackHeight = scenario.tracks.length * TRACK_H;
+
+  const phaseLabel =
+    execution.state.phase === 'running'
+      ? '実行中'
+      : execution.state.phase === 'error-handler'
+        ? 'エラー処理中'
+        : execution.state.phase === 'done'
+          ? '完了'
+          : execution.state.phase === 'aborted'
+            ? '中止'
+            : 'アイドル';
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-fl-bg font-mono text-fl-text">
@@ -546,7 +539,7 @@ export default function App() {
                 style={{ width: HEADER_W, height: RULER_H, borderRightWidth: 3 }}
               />
               <div className="relative flex-1 overflow-hidden">
-                <Ruler totalSlots={totalSlots} playheadSlot={playhead} />
+                <Ruler totalSlots={totalSlots} playheadSlot={-1} />
               </div>
             </div>
 
@@ -558,7 +551,8 @@ export default function App() {
                     key={track.id}
                     track={track}
                     totalSlots={totalSlots}
-                    playheadSlot={playhead}
+                    blockStatus={blockStatus}
+                    currentSlot={currentSlotByTrack[track.id]}
                     selectedBlockId={selected?.blockId ?? null}
                     linkSourceBlockId={linkSource?.blockId ?? null}
                     blocksDraggable={mode === 'block'}
@@ -569,12 +563,6 @@ export default function App() {
                     onDeleteBlock={(tid, bid) => {
                       store.deleteBlock(tid, bid);
                       if (selected?.blockId === bid) setSelected(null);
-                    }}
-                    onMoveBlock={(fromId, bid, toId, newSlot) => {
-                      store.moveBlock(fromId, bid, toId, newSlot);
-                      if (selected?.blockId === bid) {
-                        setSelected({ trackId: toId, blockId: bid });
-                      }
                     }}
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
@@ -618,7 +606,8 @@ export default function App() {
                 <TrackRow
                   track={scenario.errorHandler}
                   totalSlots={totalSlots}
-                  playheadSlot={-1}
+                  blockStatus={blockStatus}
+                  currentSlot={currentSlotByTrack[ERROR_HANDLER_ID]}
                   selectedBlockId={selected?.blockId ?? null}
                   linkSourceBlockId={linkSource?.blockId ?? null}
                   blocksDraggable={mode === 'block'}
@@ -630,12 +619,6 @@ export default function App() {
                   onDeleteBlock={(tid, bid) => {
                     store.deleteBlock(tid, bid);
                     if (selected?.blockId === bid) setSelected(null);
-                  }}
-                  onMoveBlock={(fromId, bid, toId, newSlot) => {
-                    store.moveBlock(fromId, bid, toId, newSlot);
-                    if (selected?.blockId === bid) {
-                      setSelected({ trackId: toId, blockId: bid });
-                    }
                   }}
                   onSelectBlock={handleBlockClick}
                   onCanvasClick={handleCanvasClick}
@@ -670,16 +653,6 @@ export default function App() {
                       />
                     </div>
                   ))}
-                  {playhead >= 0 && (
-                    <div
-                      className="pointer-events-none absolute top-0 h-full w-px"
-                      style={{
-                        left: playhead * SLOT_PX,
-                        background: '#22C55E88',
-                        boxShadow: '0 0 6px #22C55E',
-                      }}
-                    />
-                  )}
                 </div>
               </>
             ) : (
@@ -688,7 +661,8 @@ export default function App() {
                   <TrackRow
                     track={subroutineTrack}
                     totalSlots={totalSlots}
-                    playheadSlot={-1}
+                    blockStatus={blockStatus}
+                    currentSlot={currentSlotByTrack[subroutineTrack.id]}
                     selectedBlockId={selected?.blockId ?? null}
                     linkSourceBlockId={linkSource?.blockId ?? null}
                     blocksDraggable={mode === 'block'}
@@ -701,12 +675,6 @@ export default function App() {
                     onDeleteBlock={(tid, bid) => {
                       store.deleteBlock(tid, bid);
                       if (selected?.blockId === bid) setSelected(null);
-                    }}
-                    onMoveBlock={(fromId, bid, toId, newSlot) => {
-                      store.moveBlock(fromId, bid, toId, newSlot);
-                      if (selected?.blockId === bid) {
-                        setSelected({ trackId: toId, blockId: bid });
-                      }
                     }}
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
@@ -751,30 +719,13 @@ export default function App() {
         />
       </div>
 
-      {/* Footer legend */}
-      <div className="flex flex-shrink-0 flex-wrap gap-6 border-t border-fl-border bg-fl-panel px-5 py-1.5">
-        {(
-          [
-            ['▣', '#3b82f6', '1 ブロック = 1 slot'],
-            ['⬡', '#f43f5e', '同期ポイント = DAG 合流'],
-            ['?', '#eab308', 'バッジ = 非デフォルト属性'],
-            ['⚡', '#22c55e', 'トラックは並列実行'],
-          ] as const
-        ).map(([icon, color, text]) => (
-          <div
-            key={text}
-            className="flex items-center gap-1.5 text-[9px] text-fl-text-faint"
-          >
-            <span style={{ color }}>{icon}</span>
-            {text}
-          </div>
-        ))}
-        {playhead >= 0 && (
-          <div className="ml-auto text-[9px] text-[#22c55e]">
-            ▶ slot #{playhead.toFixed(1)}
-          </div>
-        )}
-      </div>
+      {/* Execution log panel (collapses to a thin status bar when idle) */}
+      <ExecutionLogPanel
+        logs={execution.state.logs}
+        phase={execution.state.phase}
+        phaseLabel={phaseLabel}
+        running={execution.running}
+      />
 
       {/* Modals */}
       {addModal && (

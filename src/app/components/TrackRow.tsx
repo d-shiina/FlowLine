@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { Block, Subroutine, Track } from '../types';
+import type { BlockStatus } from '../engine';
 import { HEADER_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
 import { BlockView } from './BlockView';
 
@@ -9,7 +10,8 @@ type Variant = 'normal' | 'error';
 interface Props {
   track: Track;
   totalSlots: number;
-  playheadSlot: number;
+  blockStatus: Record<string, BlockStatus>;
+  currentSlot: number | undefined;
   selectedBlockId: string | null;
   linkSourceBlockId: string | null;
   blocksDraggable: boolean;
@@ -23,12 +25,6 @@ interface Props {
     patch: Partial<Block>,
   ) => void;
   onDeleteBlock: (trackId: string, blockId: string) => void;
-  onMoveBlock: (
-    fromId: string,
-    blockId: string,
-    toId: string,
-    newSlot: number,
-  ) => void;
   onSelectBlock: (trackId: string, blockId: string) => void;
   onCanvasClick: (trackId: string, slot: number) => void;
 }
@@ -36,7 +32,8 @@ interface Props {
 export function TrackRow({
   track,
   totalSlots,
-  playheadSlot,
+  blockStatus,
+  currentSlot,
   selectedBlockId,
   linkSourceBlockId,
   blocksDraggable,
@@ -46,7 +43,6 @@ export function TrackRow({
   onDelete,
   onUpdateBlock,
   onDeleteBlock,
-  onMoveBlock,
   onSelectBlock,
   onCanvasClick,
 }: Props) {
@@ -176,27 +172,38 @@ export function TrackRow({
           </div>
         )}
 
-        {track.blocks.map((b) => {
-          const active = playheadSlot >= b.slot && playheadSlot < b.slot + 1;
-          const past = playheadSlot >= b.slot + 1;
-          return (
-            <BlockView
-              key={b.id}
-              block={b}
-              trackId={track.id}
-              active={active}
-              past={past}
-              selected={selectedBlockId === b.id}
-              linkSource={linkSourceBlockId === b.id}
-              draggable={blocksDraggable}
-              subroutines={subroutines}
-              onSelect={onSelectBlock}
-              onUpdate={onUpdateBlock}
-              onDelete={onDeleteBlock}
-              onMoveToContainer={onMoveBlock}
-            />
-          );
-        })}
+        {/* per-track playhead: column highlight on the block currently
+            running, so the user can see where each parallel track is. */}
+        {currentSlot !== undefined && (
+          <div
+            className="pointer-events-none absolute top-0 h-full"
+            style={{
+              left: currentSlot * SLOT_PX,
+              width: SLOT_PX,
+              background: isError
+                ? 'linear-gradient(180deg, transparent, #f43f5e22, transparent)'
+                : 'linear-gradient(180deg, transparent, #22c55e22, transparent)',
+              borderLeft: `1px solid ${isError ? '#f43f5e66' : '#22c55e66'}`,
+              borderRight: `1px solid ${isError ? '#f43f5e66' : '#22c55e66'}`,
+            }}
+          />
+        )}
+
+        {track.blocks.map((b) => (
+          <BlockView
+            key={b.id}
+            block={b}
+            trackId={track.id}
+            status={blockStatus[b.id] ?? 'idle'}
+            selected={selectedBlockId === b.id}
+            linkSource={linkSourceBlockId === b.id}
+            draggable={blocksDraggable}
+            subroutines={subroutines}
+            onSelect={onSelectBlock}
+            onUpdate={onUpdateBlock}
+            onDelete={onDeleteBlock}
+          />
+        ))}
       </div>
     </div>
   );

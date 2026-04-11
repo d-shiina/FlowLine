@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BLOCK_META, type Block, type Subroutine } from '../types';
+import type { BlockStatus } from '../engine';
 import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
 
 interface Props {
   block: Block;
   trackId: string;
-  active: boolean;
-  past: boolean;
+  status: BlockStatus;
   selected: boolean;
   linkSource: boolean;
   draggable: boolean;
@@ -15,12 +15,6 @@ interface Props {
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
   onDelete: (trackId: string, blockId: string) => void;
-  onMoveToContainer: (
-    fromId: string,
-    blockId: string,
-    toId: string,
-    newSlot: number,
-  ) => void;
 }
 
 interface Badge {
@@ -95,8 +89,7 @@ function computeBadges(block: Block): Badge[] {
 export function BlockView({
   block,
   trackId,
-  active,
-  past,
+  status,
   selected,
   linkSource,
   draggable,
@@ -104,7 +97,6 @@ export function BlockView({
   onSelect,
   onUpdate,
   onDelete,
-  onMoveToContainer,
 }: Props) {
   const meta = BLOCK_META[block.type];
   const [hov, setHov] = useState(false);
@@ -130,44 +122,37 @@ export function BlockView({
     onSelect(trackId, block.id);
     if (!draggable) return; // link/sync mode: select only, no drag
 
+    // The block is anchored to its current track: dragging only changes
+    // the slot within this track. Cross-track moves tangled the DAG
+    // edges and changed ownership semantics, so they were removed — use
+    // cut/paste or re-add in the target track instead.
+    const node = e.currentTarget as HTMLElement;
+    const trackCanvas = node.closest<HTMLElement>(
+      `[data-container-id="${trackId}"]`,
+    );
+    if (!trackCanvas) return; // defensive: nothing to drag relative to
+
     const startX = e.clientX;
     const startY = e.clientY;
     let didMove = false;
-    // The drag result. Mutated by mousemove, committed on mouseup.
-    let targetTrackId = trackId;
     let targetSlot = block.slot;
 
-    // Hit-test suppression only kicks in once a drag actually starts, so
-    // plain click-to-select doesn't cause the click event to retarget
-    // onto the track canvas underneath.
-    const node = e.currentTarget as HTMLElement;
     const prevPointerEvents = node.style.pointerEvents;
     const beginDrag = () => {
+      // Let clicks fall through the block to the canvas so the track
+      // still receives mouseup under the cursor (keeps the click-swallow
+      // logic predictable).
       node.style.pointerEvents = 'none';
       setDragging(true);
     };
 
     const updateTarget = (ev: MouseEvent) => {
-      const elem = document.elementFromPoint(ev.clientX, ev.clientY);
-      const container = elem
-        ? (elem as Element).closest<HTMLElement>('[data-container-id]')
-        : null;
-
-      if (container) {
-        targetTrackId =
-          container.getAttribute('data-container-id') || trackId;
-        const rect = container.getBoundingClientRect();
-        targetSlot = Math.max(0, pxToSlot(ev.clientX - rect.left));
-        setGhost({
-          left: rect.left + targetSlot * SLOT_PX + BLOCK_MARGIN,
-          top: rect.top + 8,
-        });
-      } else {
-        // Cursor is outside any track canvas. Hide the ghost rather than
-        // snapping to a nonsense location — the user sees nothing will
-        // be committed unless they return over a track.
-        setGhost(null);
-      }
+      const rect = trackCanvas.getBoundingClientRect();
+      targetSlot = Math.max(0, pxToSlot(ev.clientX - rect.left));
+      setGhost({
+        left: rect.left + targetSlot * SLOT_PX + BLOCK_MARGIN,
+        top: rect.top + 8,
+      });
     };
 
     const onMove = (ev: MouseEvent) => {
@@ -189,11 +174,7 @@ export function BlockView({
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('keydown', onKey);
       if (didMove) {
-        try {
-          node.style.pointerEvents = prevPointerEvents;
-        } catch {
-          /* node may be detached after a cross-container move */
-        }
+        node.style.pointerEvents = prevPointerEvents;
         setDragging(false);
         setGhost(null);
       }
@@ -204,16 +185,8 @@ export function BlockView({
 
       if (!didMove || cancelled) return;
 
-      // Commit the move. For same-container we shortcut via updateBlock
-      // so undo history records a single slot change; cross-container
-      // goes through moveBlock so the scenario store handles the
-      // transfer atomically.
-      if (targetTrackId === trackId) {
-        if (targetSlot !== block.slot) {
-          onUpdate(trackId, block.id, { slot: targetSlot });
-        }
-      } else {
-        onMoveToContainer(trackId, block.id, targetTrackId, targetSlot);
+      if (targetSlot !== block.slot) {
+        onUpdate(trackId, block.id, { slot: targetSlot });
       }
 
       // Swallow the click that the browser synthesizes after the
@@ -244,15 +217,59 @@ export function BlockView({
 
   const badges = computeBadges(block);
 
+  const isRunning = status === 'running';
+  const isError = status === 'error';
+  const isOk = status === 'ok';
+  const isSkipped = status === 'skipped';
+  const isCancelled = status === 'cancelled';
+  const isFaded = isSkipped || isCancelled;
+
+  // Execution state trumps selection/hover when it comes to coloring the
+  // frame, since it's the most important signal while the scenario is
+  // running.
   const borderColor = linkSource
     ? '#60a5fa'
-    : selected
-      ? meta.color
-      : active
+    : isError
+      ? '#ef4444'
+      : isRunning
         ? meta.color
-        : past
-          ? `${meta.color}30`
-          : `${meta.color}${hov ? 'cc' : '66'}`;
+        : selected
+          ? meta.color
+          : isOk
+            ? `${meta.color}44`
+            : isFaded
+              ? '#94a3b855'
+              : `${meta.color}${hov ? 'cc' : '66'}`;
+
+  const background = isError
+    ? '#ef44441f'
+    : isRunning
+      ? `${meta.color}44`
+      : isOk
+        ? `${meta.color}10`
+        : isFaded
+          ? 'transparent'
+          : hov
+            ? `${meta.color}28`
+            : `${meta.color}18`;
+
+  const shadow = linkSource
+    ? '0 0 12px #60a5fa88'
+    : isError
+      ? '0 0 18px #ef444488'
+      : isRunning
+        ? `0 0 18px ${meta.color}aa`
+        : selected
+          ? `0 0 0 1px ${meta.color}88`
+          : 'none';
+
+  const zIndex = linkSource
+    ? 6
+    : isRunning || isError
+      ? 5
+      : selected
+        ? 4
+        : 2;
 
   return (
     <>
@@ -264,23 +281,13 @@ export function BlockView({
           width,
           height: TRACK_H - 16,
           cursor: draggable ? (dragging ? 'grabbing' : 'grab') : 'crosshair',
-          opacity: dragging ? 0.35 : 1,
-          background: active
-            ? `${meta.color}44`
-            : past
-              ? `${meta.color}0a`
-              : hov
-                ? `${meta.color}28`
-                : `${meta.color}18`,
-          border: `${linkSource ? 2 : 1.5}px solid ${borderColor}`,
-          boxShadow: linkSource
-            ? '0 0 12px #60a5fa88'
-            : active
-              ? `0 0 14px ${meta.color}66`
-              : selected
-                ? `0 0 0 1px ${meta.color}88`
-                : 'none',
-          zIndex: linkSource ? 6 : active ? 5 : selected ? 4 : 2,
+          opacity: dragging ? 0.35 : isFaded ? 0.5 : 1,
+          background,
+          border: `${linkSource ? 2 : isError || isRunning ? 2 : 1.5}px ${
+            isSkipped || isCancelled ? 'dashed' : 'solid'
+          } ${borderColor}`,
+          boxShadow: shadow,
+          zIndex,
         }}
         onMouseEnter={() => setHov(true)}
         onMouseLeave={() => setHov(false)}
@@ -300,17 +307,42 @@ export function BlockView({
           <div
             className="truncate font-mono text-[11px]"
             style={{
-              color: past
+              color: isFaded
                 ? 'var(--fl-text-ghost)'
-                : block.type === 'subroutine' && !subRef
-                  ? '#f59e0b'
-                  : 'var(--fl-text-muted)',
+                : isError
+                  ? '#ef4444'
+                  : block.type === 'subroutine' && !subRef
+                    ? '#f59e0b'
+                    : isOk
+                      ? 'var(--fl-text-faint)'
+                      : 'var(--fl-text-muted)',
             }}
             title={displayLabel}
           >
             {displayLabel}
           </div>
         </div>
+
+        {/* Execution status indicator — top-right corner, hidden on hover
+            so the delete button stays usable. */}
+        {!hov && (isRunning || isOk || isError || isSkipped) && (
+          <span
+            className="pointer-events-none absolute right-1 top-1 flex h-3 items-center justify-center rounded px-1 font-mono text-[8px] font-bold leading-none"
+            style={{
+              background: isError
+                ? '#ef4444'
+                : isRunning
+                  ? meta.color
+                  : isOk
+                    ? `${meta.color}66`
+                    : '#94a3b866',
+              color: isError || isRunning ? '#fff' : 'var(--fl-text)',
+            }}
+            title={status}
+          >
+            {isRunning ? '●' : isOk ? '✓' : isError ? '✕' : '–'}
+          </span>
+        )}
 
         {badges.length > 0 && (
           <div className="pointer-events-none absolute left-1 bottom-1 flex gap-0.5">
