@@ -3,7 +3,14 @@ import { AlertTriangle } from 'lucide-react';
 import type { Block, Subroutine, Track } from '../types';
 import { BLOCK_META } from '../types';
 import type { BlockStatus } from '../engine';
-import { BLOCK_MARGIN, HEADER_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
+import {
+  BLOCK_MARGIN,
+  HEADER_W,
+  LANE_H,
+  SLOT_PX,
+  TRACK_H,
+  pxToSlot,
+} from '../layout';
 import { BlockView } from './BlockView';
 
 type Variant = 'normal' | 'error';
@@ -68,52 +75,117 @@ export function TrackRow({
     setRenaming(false);
   };
 
-  // Compute the set of container-frame rects for loop / branch
-  // blocks on this track. Every loop/branch gets a frame, even when
-  // it has no children yet — empty frames render as a faint ghost
-  // hint so the user sees the drop zone. Frames with children
-  // extend to enclose them horizontally. Sorted by leftmost slot so
-  // overlapping frames layer predictably (leftmost drawn first).
+  // Compute container-frame rects for every loop / branch / switch
+  // on this track. Each frame carries the list of "cases" (lane
+  // labels) so the renderer can split the interior into vertical
+  // lanes — branches get ['then','else'], switches get whatever
+  // ``params.cases`` declares, loops have a single empty-string
+  // lane.
+  //
+  // Empty containers still get a ghost frame so the drop zone is
+  // visible. Sorted by fromSlot so overlapping frames layer
+  // predictably (leftmost rendered first).
   const containerFrames = useMemo(() => {
     const frames: Array<{
       id: string;
+      parentType: 'loop' | 'branch' | 'switch';
       label: string;
       color: string;
       fromSlot: number;
       toSlot: number;
       empty: boolean;
+      /** Lane labels, top-to-bottom. Empty string = single lane. */
+      cases: string[];
     }> = [];
     for (const parent of track.blocks) {
-      if (parent.type !== 'loop' && parent.type !== 'branch') continue;
+      if (
+        parent.type !== 'loop' &&
+        parent.type !== 'branch' &&
+        parent.type !== 'switch'
+      ) {
+        continue;
+      }
+      const cases: string[] =
+        parent.type === 'branch'
+          ? ['then', 'else']
+          : parent.type === 'switch'
+            ? Array.isArray(
+                (parent.params as Record<string, unknown> | undefined)?.cases,
+              )
+              ? (
+                  (parent.params as { cases: unknown[] }).cases.map((c) =>
+                    String(c),
+                  )
+                )
+              : ['case_0']
+            : [''];
       const children = track.blocks.filter(
         (b) => b.parentBlockId === parent.id,
       );
+      let fromSlot: number;
+      let toSlot: number;
+      let empty = false;
       if (children.length === 0) {
-        // Ghost drop zone: parent + one slot of body room.
-        frames.push({
-          id: parent.id,
-          label: parent.label,
-          color: BLOCK_META[parent.type].color,
-          fromSlot: parent.slot,
-          toSlot: parent.slot + 1,
-          empty: true,
-        });
-        continue;
+        fromSlot = parent.slot;
+        toSlot = parent.slot + 1;
+        empty = true;
+      } else {
+        const childMin = Math.min(...children.map((c) => c.slot));
+        const childMax = Math.max(...children.map((c) => c.slot));
+        fromSlot = Math.min(parent.slot, childMin);
+        toSlot = Math.max(parent.slot, childMax);
       }
-      const childMin = Math.min(...children.map((c) => c.slot));
-      const childMax = Math.max(...children.map((c) => c.slot));
       frames.push({
         id: parent.id,
+        parentType: parent.type,
         label: parent.label,
         color: BLOCK_META[parent.type].color,
-        fromSlot: Math.min(parent.slot, childMin),
-        toSlot: Math.max(parent.slot, childMax),
-        empty: false,
+        fromSlot,
+        toSlot,
+        empty,
+        cases,
       });
     }
     frames.sort((a, b) => a.fromSlot - b.fromSlot);
     return frames;
   }, [track.blocks]);
+
+  // Row height grows to fit the widest lane stack on this track.
+  // Two lanes fit inside TRACK_H natively; 3+ lanes add LANE_H
+  // per extra lane so children render at a readable height.
+  const maxLanes = useMemo(() => {
+    let n = 1;
+    for (const f of containerFrames) {
+      if (f.cases.length > n) n = f.cases.length;
+    }
+    return n;
+  }, [containerFrames]);
+  const trackHeight = Math.max(TRACK_H, maxLanes * LANE_H + 16);
+
+  // Per-block lane info keyed by block.id. Top-level blocks live
+  // on lane -1 (full row). Children of a multi-case container get
+  // (laneIndex, laneCount) so BlockView can offset + size itself.
+  const blockLanes = useMemo(() => {
+    const out: Record<
+      string,
+      { laneIndex: number; laneCount: number; color: string }
+    > = {};
+    for (const f of containerFrames) {
+      if (f.cases.length <= 1) continue; // loops: full-height children
+      for (const child of track.blocks) {
+        if (child.parentBlockId !== f.id) continue;
+        const label = child.parentBranch ?? f.cases[0];
+        const idx = f.cases.indexOf(label);
+        if (idx < 0) continue;
+        out[child.id] = {
+          laneIndex: idx,
+          laneCount: f.cases.length,
+          color: f.color,
+        };
+      }
+    }
+    return out;
+  }, [containerFrames, track.blocks]);
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
@@ -136,7 +208,7 @@ export function TrackRow({
   return (
     <div
       className="flex border-b border-fl-border"
-      style={{ height: TRACK_H }}
+      style={{ height: trackHeight }}
     >
       {/* header */}
       <div
@@ -243,16 +315,24 @@ export function TrackRow({
           </div>
         )}
 
-        {/* Container frames (loop / branch scope visualisation).
-            Rendered behind the blocks so the blocks themselves stay
-            interactive. Empty containers render as faint ghost
-            zones so the user has a visible drop target. */}
+        {/* Container frames (loop / branch / switch scope
+            visualisation). Rendered behind the blocks so they stay
+            interactive. Multi-case containers draw horizontal
+            dividers between lanes + a label per lane so the
+            TRUE/FALSE or per-case boundaries are obvious. */}
         {containerFrames.map((f) => {
           const left = f.fromSlot * SLOT_PX + BLOCK_MARGIN / 2;
           const width =
             (f.toSlot - f.fromSlot + 1) * SLOT_PX - BLOCK_MARGIN;
           const borderAlpha = f.empty ? '44' : '88';
           const bgAlpha = f.empty ? '08' : '0f';
+          const multiLane = f.cases.length > 1;
+          const frameTop = 3;
+          const frameBottom = 3;
+          const frameHeight = trackHeight - frameTop - frameBottom;
+          const laneHeight = multiLane
+            ? frameHeight / f.cases.length
+            : frameHeight;
           return (
             <div
               key={f.id}
@@ -260,8 +340,8 @@ export function TrackRow({
               style={{
                 left,
                 width,
-                top: 3,
-                bottom: 3,
+                top: frameTop,
+                bottom: frameBottom,
                 borderColor: `${f.color}${borderAlpha}`,
                 background: `${f.color}${bgAlpha}`,
                 zIndex: 0,
@@ -283,6 +363,38 @@ export function TrackRow({
               >
                 {f.label}
               </div>
+              {/* Lane dividers + per-lane labels */}
+              {multiLane &&
+                f.cases.map((caseLabel, i) => {
+                  const top = i * laneHeight;
+                  const isLast = i === f.cases.length - 1;
+                  return (
+                    <div
+                      key={`${caseLabel}-${i}`}
+                      className="absolute"
+                      style={{
+                        top,
+                        left: 0,
+                        right: 0,
+                        height: laneHeight,
+                        borderTop:
+                          i === 0 ? 'none' : `1px dashed ${f.color}55`,
+                      }}
+                    >
+                      <span
+                        className="absolute right-1 font-mono text-[8px] font-bold uppercase tracking-wider"
+                        style={{
+                          top: isLast ? undefined : 1,
+                          bottom: isLast ? 1 : undefined,
+                          color: f.color,
+                          opacity: 0.75,
+                        }}
+                      >
+                        {caseLabel}
+                      </span>
+                    </div>
+                  );
+                })}
               {f.empty && (
                 <div
                   className="absolute inset-0 flex items-center justify-center font-mono text-[9px]"
@@ -323,6 +435,8 @@ export function TrackRow({
             draggable={blocksDraggable}
             slotBounds={slotBounds[b.id]}
             containerFrames={containerFrames}
+            lane={blockLanes[b.id]}
+            trackHeight={trackHeight}
             subroutines={subroutines}
             onSelect={onSelectBlock}
             onUpdate={onUpdateBlock}

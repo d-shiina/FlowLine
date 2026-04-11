@@ -36,6 +36,8 @@ function defaultLabel(type: BlockType): string {
       return 'ループ';
     case 'branch':
       return '分岐';
+    case 'switch':
+      return 'スイッチ';
     case 'wait':
       return '待機';
     case 'subroutine':
@@ -44,6 +46,18 @@ function defaultLabel(type: BlockType): string {
     default:
       return 'アクション';
   }
+}
+
+/** Initial params scaffolding for types that need a default shape. */
+function defaultParams(type: BlockType): Record<string, unknown> | undefined {
+  if (type === 'switch') {
+    // Two cases + a default is the most common starting shape and
+    // populates the visual lanes immediately so the user sees the
+    // fork. Expression is left blank — the user configures it in
+    // the Inspector's evaluation field.
+    return { cases: ['case_0', 'case_1', 'default'] };
+  }
+  return undefined;
 }
 
 export function AddBlockModal({
@@ -72,12 +86,14 @@ export function AddBlockModal({
       type === 'subroutine'
         ? (sub?.name ?? defaultLabel(type))
         : custom || label || defaultLabel(type);
+    const params = defaultParams(type);
     onAdd({
       id: uid('b'),
       type,
       label: finalLabel,
       slot,
       deps: [],
+      ...(params !== undefined ? { params } : {}),
       ...(type === 'subroutine' ? { subroutineId } : {}),
     });
     setCustom('');

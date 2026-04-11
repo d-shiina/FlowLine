@@ -2,16 +2,30 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BLOCK_META, type Block, type Subroutine } from '../types';
 import type { BlockStatus } from '../engine';
-import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
+import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, pxToSlot } from '../layout';
 
 /** Rect of a container frame rendered on the same track. */
 export interface ContainerFrameRect {
   id: string;
+  parentType: 'loop' | 'branch' | 'switch';
   label: string;
   color: string;
   fromSlot: number;
   toSlot: number;
   empty: boolean;
+  /** Lane labels, top-to-bottom. One entry = full-height body. */
+  cases: string[];
+}
+
+/**
+ * Rendering info for blocks that live inside a multi-case
+ * container (branch / switch). Drives vertical offset + half-
+ * height rendering so each case occupies its own lane.
+ */
+export interface BlockLaneInfo {
+  laneIndex: number;
+  laneCount: number;
+  color: string;
 }
 
 interface Props {
@@ -31,10 +45,15 @@ interface Props {
   /**
    * Container frames that currently exist on the same track. Used by
    * the drag handler to auto-reparent a block when it's dropped over
-   * a loop / branch scope. When `block` IS a container, its own frame
-   * is excluded from the hit-test so you can't nest it inside itself.
+   * a loop / branch / switch scope. When `block` IS a container, its
+   * own frame is excluded from the hit-test so you can't nest it
+   * inside itself.
    */
   containerFrames: ContainerFrameRect[];
+  /** Lane info when the block lives in a multi-case container. */
+  lane?: BlockLaneInfo;
+  /** Actual track row height (may grow for tall switches). */
+  trackHeight: number;
   subroutines: Subroutine[];
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
@@ -48,10 +67,11 @@ interface Badge {
   tooltip: string;
 }
 
-/** Live position of the drop-target ghost in viewport coordinates. */
+/** Live position + size of the drop-target ghost in viewport coordinates. */
 interface GhostState {
   left: number;
   top: number;
+  height: number;
 }
 
 /**
@@ -119,6 +139,8 @@ export function BlockView({
   draggable,
   slotBounds,
   containerFrames,
+  lane,
+  trackHeight,
   subroutines,
   onSelect,
   onUpdate,
@@ -142,6 +164,20 @@ export function BlockView({
   const left = block.slot * SLOT_PX + BLOCK_MARGIN;
   const width = BLOCK_W;
 
+  // Vertical placement depends on whether this block lives in a
+  // multi-case container. Top-level and loop-body blocks fill the
+  // entire row; branch / switch children share the row across N
+  // lanes, positioned by laneIndex.
+  const frameInset = 3;
+  const usableH = trackHeight - frameInset * 2;
+  let blockTop = 8;
+  let blockH = trackHeight - 16;
+  if (lane && lane.laneCount > 1) {
+    const laneH = usableH / lane.laneCount;
+    blockTop = frameInset + lane.laneIndex * laneH + 3;
+    blockH = laneH - 6;
+  }
+
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -162,6 +198,14 @@ export function BlockView({
     const startY = e.clientY;
     let didMove = false;
     let targetSlot = block.slot;
+    /**
+     * The container frame the cursor is hovering over, updated in
+     * real time by ``updateTarget``. On drop, the block auto-re-
+     * parents into that container (and picks the right case lane
+     * for branch / switch containers by hit-testing the Y axis).
+     */
+    let landingFrame: ContainerFrameRect | null = null;
+    let landingCase: string | undefined = undefined;
 
     const prevPointerEvents = node.style.pointerEvents;
     const beginDrag = () => {
@@ -183,9 +227,49 @@ export function BlockView({
       const rect = trackCanvas.getBoundingClientRect();
       const raw = Math.max(0, pxToSlot(ev.clientX - rect.left));
       targetSlot = Math.min(Math.max(raw, minSlot), maxSlot);
+
+      // Find the container frame the cursor is over (ignoring this
+      // block's own frame so a loop can't be dropped into itself).
+      const hits = containerFrames.filter(
+        (f) =>
+          f.id !== block.id &&
+          targetSlot >= f.fromSlot &&
+          targetSlot <= f.toSlot,
+      );
+      landingFrame = hits.length > 0 ? hits[hits.length - 1] : null;
+      landingCase = undefined;
+
+      // Compute the ghost's Y based on the landing lane. When the
+      // frame has multiple cases, pick the lane whose Y band
+      // contains the cursor so the ghost previews the right slot.
+      let ghostTop = rect.top + 8;
+      let ghostH = blockH;
+      if (landingFrame && landingFrame.cases.length > 1) {
+        const frameTop = rect.top + 3;
+        const frameH = trackHeight - 6;
+        const laneH = frameH / landingFrame.cases.length;
+        const yInFrame = ev.clientY - frameTop;
+        const idx = Math.max(
+          0,
+          Math.min(
+            landingFrame.cases.length - 1,
+            Math.floor(yInFrame / laneH),
+          ),
+        );
+        landingCase = landingFrame.cases[idx];
+        ghostTop = frameTop + idx * laneH + 3;
+        ghostH = laneH - 6;
+      } else if (landingFrame) {
+        // Single-lane container (loop or empty branch/switch
+        // — pick the first case so the drop is always valid).
+        landingCase =
+          landingFrame.cases.length > 0 ? landingFrame.cases[0] : undefined;
+      }
+
       setGhost({
         left: rect.left + targetSlot * SLOT_PX + BLOCK_MARGIN,
-        top: rect.top + 8,
+        top: ghostTop,
+        height: ghostH,
       });
     };
 
@@ -219,34 +303,36 @@ export function BlockView({
 
       if (!didMove || cancelled) return;
 
-      // Compute the container frame the drop slot falls into, so we
-      // can auto-reparent the block into the loop/branch scope (or
-      // un-nest it if the drop is outside any frame). The block's
-      // own frame is skipped so a container can't nest itself.
-      const landingFrame = containerFrames.find(
-        (f) =>
-          f.id !== block.id &&
-          targetSlot >= f.fromSlot &&
-          targetSlot <= f.toSlot,
-      );
-
+      // Drop result already computed by updateTarget: landingFrame
+      // is the container we're hovering (null when outside every
+      // frame), landingCase is the specific lane we'd assign to
+      // within that container.
       const patch: Partial<Block> = {};
       if (targetSlot !== block.slot) patch.slot = targetSlot;
 
       const nextParentId = landingFrame?.id;
       if (nextParentId !== block.parentBlockId) {
         patch.parentBlockId = nextParentId;
-        // Entering/exiting a branch clears or defaults the branch
-        // selector. Default to 'then' when entering a branch so new
-        // children land on the true side; the Inspector can flip it.
-        if (nextParentId === undefined) {
+      }
+
+      if (nextParentId === undefined) {
+        // Un-nested — drop any lingering case label so the block
+        // renders full-height.
+        if (block.parentBranch !== undefined) {
           patch.parentBranch = undefined;
-        } else {
-          patch.parentBranch =
-            block.parentBranch && block.parentBlockId === nextParentId
-              ? block.parentBranch
-              : 'then';
         }
+      } else if (landingFrame && landingFrame.cases.length > 1) {
+        // Multi-case container: honour whichever lane the cursor
+        // was over at drop time. Falls back to the first case when
+        // landingCase somehow ends up undefined.
+        const nextCase = landingCase ?? landingFrame.cases[0];
+        if (nextCase !== block.parentBranch) {
+          patch.parentBranch = nextCase;
+        }
+      } else if (block.parentBranch !== undefined) {
+        // Single-lane container (loop): clear any stale case label
+        // from a previous parent.
+        patch.parentBranch = undefined;
       }
 
       if (Object.keys(patch).length > 0) {
@@ -341,9 +427,9 @@ export function BlockView({
         className="absolute select-none overflow-hidden rounded-lg px-2 transition-colors"
         style={{
           left,
-          top: 8,
+          top: blockTop,
           width,
-          height: TRACK_H - 16,
+          height: blockH,
           cursor: draggable ? (dragging ? 'grabbing' : 'grab') : 'crosshair',
           opacity: dragging ? 0.35 : isFaded ? 0.5 : 1,
           background,
@@ -423,10 +509,10 @@ export function BlockView({
           </div>
         )}
 
-        {/* TRUE / FALSE pill for branch children so it's obvious
-            which side of the branch owns each block without having
-            to open the Inspector. */}
-        {block.parentBranch && (
+        {/* TRUE / FALSE pill for branch children (only when the
+            parent is a 2-way branch; switch case labels are shown
+            on the lane header instead). */}
+        {(block.parentBranch === 'then' || block.parentBranch === 'else') && (
           <span
             className="pointer-events-none absolute right-1 bottom-1 flex h-3 items-center justify-center rounded px-1 font-mono text-[8px] font-bold leading-none"
             style={{
@@ -467,7 +553,7 @@ export function BlockView({
               left: ghost.left,
               top: ghost.top,
               width: BLOCK_W,
-              height: TRACK_H - 16,
+              height: ghost.height,
               background: `${meta.color}33`,
               border: `2px dashed ${meta.color}`,
               boxShadow: `0 0 14px ${meta.color}66, inset 0 0 10px ${meta.color}33`,

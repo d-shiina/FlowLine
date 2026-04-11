@@ -9,7 +9,13 @@
  * Error handling follows a 3-layer model — see docs/02-error-handling.md.
  */
 
-export type BlockType = 'action' | 'wait' | 'loop' | 'branch' | 'subroutine';
+export type BlockType =
+  | 'action'
+  | 'wait'
+  | 'loop'
+  | 'branch'
+  | 'switch'
+  | 'subroutine';
 
 /**
  * Per-block error policy.
@@ -86,13 +92,18 @@ export interface Block {
    */
   parentBlockId?: string;
   /**
-   * For blocks whose parent is a branch, which side of the branch
-   * they belong to. Ignored when the parent is a loop (loops have
-   * a single body). Defaults to ``then`` when a new child is
-   * dropped into a branch frame; the user can flip it via the
-   * Inspector.
+   * Which case of the parent container this block belongs to.
+   *
+   * - Branch parent  → ``"then"`` / ``"else"``
+   * - Switch parent  → one of the strings listed in
+   *                    ``parent.params.cases`` (including the
+   *                    conventional ``"default"`` fallback).
+   * - Loop parent    → ignored (single body).
+   *
+   * A fresh drop into a multi-case container picks the first case
+   * as the default; the user can flip it via the Inspector.
    */
-  parentBranch?: 'then' | 'else';
+  parentBranch?: string;
 }
 
 export interface Track {
@@ -147,6 +158,7 @@ export const BLOCK_META: Record<
   wait: { color: '#06B6D4', icon: '⏸', label: '待機' },
   loop: { color: '#8B5CF6', icon: '↻', label: 'ループ' },
   branch: { color: '#F59E0B', icon: '⑂', label: '分岐' },
+  switch: { color: '#EC4899', icon: '⧉', label: 'スイッチ' },
   subroutine: { color: '#94A3B8', icon: '⎔', label: 'サブルーチン' },
 };
 

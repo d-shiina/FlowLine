@@ -236,6 +236,97 @@ const controlFlow: Scenario = {
   subroutines: [],
 };
 
+/**
+ * Switch showcase: three parallel case lanes + a default fallback,
+ * nicely visible as vertical split lanes on the timeline.
+ */
+const switchDemo: Scenario = {
+  version: '1.0',
+  name: 'スイッチデモ',
+  variables: {
+    scenario: {
+      status: 'ok',
+    },
+  },
+  tracks: [
+    {
+      id: 'track-1',
+      name: 'メイン',
+      color: '#EC4899',
+      blocks: [
+        {
+          id: 'b-prep',
+          type: 'action',
+          label: 'ステータス取得',
+          slot: 0,
+          deps: [],
+        },
+        {
+          id: 'b-switch',
+          type: 'switch',
+          label: 'status の分岐',
+          slot: 1,
+          deps: ['b-prep'],
+          params: {
+            expression: { var: 'scenario.status' },
+            cases: ['ok', 'warn', 'error', 'default'],
+          },
+        },
+        // ok lane
+        {
+          id: 'b-ok',
+          type: 'action',
+          label: '正常処理',
+          slot: 2,
+          deps: [],
+          parentBlockId: 'b-switch',
+          parentBranch: 'ok',
+        },
+        // warn lane
+        {
+          id: 'b-warn',
+          type: 'action',
+          label: '警告ログ',
+          slot: 2,
+          deps: [],
+          parentBlockId: 'b-switch',
+          parentBranch: 'warn',
+        },
+        // error lane
+        {
+          id: 'b-err',
+          type: 'action',
+          label: 'エラー通知',
+          slot: 2,
+          deps: [],
+          parentBlockId: 'b-switch',
+          parentBranch: 'error',
+        },
+        // default fallback
+        {
+          id: 'b-def',
+          type: 'action',
+          label: '不明ステータス',
+          slot: 2,
+          deps: [],
+          parentBlockId: 'b-switch',
+          parentBranch: 'default',
+        },
+        {
+          id: 'b-done',
+          type: 'action',
+          label: '完了通知',
+          slot: 3,
+          deps: ['b-switch'],
+        },
+      ],
+    },
+  ],
+  syncPoints: [],
+  errorHandler: emptyErrorHandler(),
+  subroutines: [],
+};
+
 export interface Sample {
   id: string;
   label: string;
@@ -255,6 +346,12 @@ export const SAMPLES: Sample[] = [
     label: 'ループ & 分岐デモ',
     description: 'ループ(回数/条件)、分岐(TRUE/FALSE)、内包ブロック',
     scenario: controlFlow,
+  },
+  {
+    id: 'switch',
+    label: 'スイッチデモ',
+    description: 'スイッチブロック (N ケース分岐 + default)',
+    scenario: switchDemo,
   },
   {
     id: 'basic',

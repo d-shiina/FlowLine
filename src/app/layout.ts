@@ -16,6 +16,13 @@ export const BLOCK_W = SLOT_PX - BLOCK_MARGIN * 2;
 
 /** Track row height (used for both regular tracks and the error handler). */
 export const TRACK_H = 72;
+/**
+ * Vertical pixel budget per lane when a branch / switch container
+ * splits its children into multiple horizontal sub-lanes. Two lanes
+ * (default branch) fit inside ``TRACK_H``; rows with 3+ lanes grow
+ * proportionally (see ``trackRowHeight`` in TrackRow).
+ */
+export const LANE_H = 32;
 /** Left header column width. */
 export const HEADER_W = 168;
 /** Top ruler height. */

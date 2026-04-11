@@ -278,9 +278,27 @@ export default function App() {
         (b) =>
           b.id !== selected.blockId &&
           !descendants.has(b.id) &&
-          (b.type === 'loop' || b.type === 'branch'),
+          (b.type === 'loop' ||
+            b.type === 'branch' ||
+            b.type === 'switch'),
       )
-      .map((b) => ({ id: b.id, label: b.label, type: b.type }));
+      .map((b) => {
+        const cases: string[] =
+          b.type === 'branch'
+            ? ['then', 'else']
+            : b.type === 'switch'
+              ? Array.isArray(
+                  (b.params as Record<string, unknown> | undefined)?.cases,
+                )
+                ? (
+                    (b.params as { cases: unknown[] }).cases.map((c) =>
+                      String(c),
+                    )
+                  )
+                : []
+              : [];
+        return { id: b.id, label: b.label, type: b.type, cases };
+      });
   }, [selected, scenario]);
 
   /**

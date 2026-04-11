@@ -5,7 +5,7 @@ import type {
   LogEntry,
 } from './types';
 import type { NodeContext, Runtime } from './runtime';
-import { evalBool } from './jsonLogic';
+import { evalBool, evalJsonLogic } from './jsonLogic';
 
 export interface ExecutionHooks {
   onStateChange(state: ExecutionState): void;
@@ -256,24 +256,31 @@ export class Executor {
       await this.executeBranch(containerId, trackBlocks, block, opts);
       return;
     }
+    if (block.type === 'switch') {
+      await this.executeSwitch(containerId, trackBlocks, block, opts);
+      return;
+    }
     await this.executeBlock(containerId, block, opts);
   }
 
   /**
    * Children of ``parentId`` within the given track block pool,
-   * optionally filtered by which side of a branch they belong to.
-   * Sorted by slot so execution order matches visual order.
+   * optionally filtered by parentBranch / case label. Sorted by
+   * slot so execution order matches visual order. Passing
+   * ``branch`` matches exact string equality — branches use
+   * ``'then'``/``'else'`` conventionally, switches use whatever
+   * case labels are declared on the parent.
    */
   private childrenOf(
     trackBlocks: Block[],
     parentId: string,
-    branch?: 'then' | 'else',
+    branch?: string,
   ): Block[] {
     return trackBlocks
       .filter(
         (b) =>
           b.parentBlockId === parentId &&
-          (branch === undefined || (b.parentBranch ?? 'then') === branch),
+          (branch === undefined || (b.parentBranch ?? '') === branch),
       )
       .sort((a, b) => a.slot - b.slot);
   }
@@ -454,6 +461,112 @@ export class Executor {
       this.state.status[branchBlock.id] = 'error';
     } else {
       this.state.status[branchBlock.id] = 'ok';
+    }
+    this.flush();
+  }
+
+  /**
+   * Execute a switch block: evaluate ``params.expression`` with
+   * JSON Logic, compare the result (loosely) against each entry in
+   * ``params.cases``, and run the children whose ``parentBranch``
+   * matches the first winning case. If no case matches, the
+   * conventional ``"default"`` case is used as a fallback when
+   * present — otherwise no children run and the switch resolves
+   * to ``ok``.
+   *
+   * Children belonging to losing cases are marked ``skipped`` so
+   * the user can see which path the executor took.
+   */
+  private async executeSwitch(
+    containerId: string,
+    trackBlocks: Block[],
+    switchBlock: Block,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    this.state.status[switchBlock.id] = 'running';
+    this.flush();
+
+    const params = (switchBlock.params as Record<string, unknown>) ?? {};
+    const rawCases = Array.isArray(params.cases)
+      ? (params.cases as unknown[]).map((c) => String(c))
+      : [];
+    const expression = params.expression;
+
+    const evalVars = {
+      getVariable: (key: string) => this.variables.get(key),
+      onWarn: (msg: string) =>
+        this.log('warn', containerId, switchBlock.id, `式: ${msg}`),
+    };
+    const value = evalJsonLogic(expression, evalVars);
+
+    // Loose-match each case string against the evaluated value.
+    // Same semantics as the jsonLogic `==` operator so "5" and 5
+    // match — matches how scenario authors would expect coming
+    // from a config file.
+    const looseMatch = (caseLabel: string): boolean => {
+      if (caseLabel === 'default') return false; // default handled below
+      if (caseLabel === String(value)) return true;
+      if (typeof value === 'number' && !Number.isNaN(Number(caseLabel))) {
+        return Number(caseLabel) === value;
+      }
+      if (typeof value === 'boolean') {
+        return (
+          (caseLabel === 'true' && value === true) ||
+          (caseLabel === 'false' && value === false)
+        );
+      }
+      return false;
+    };
+
+    let winningCase: string | null =
+      rawCases.find(looseMatch) ?? null;
+    if (winningCase === null && rawCases.includes('default')) {
+      winningCase = 'default';
+    }
+
+    this.log(
+      'info',
+      containerId,
+      switchBlock.id,
+      `条件 → ${JSON.stringify(value)} / 一致: ${winningCase ?? '(なし)'}`,
+    );
+
+    // Mark all non-winning children as skipped.
+    for (const caseLabel of rawCases) {
+      if (caseLabel === winningCase) continue;
+      for (const child of this.childrenOf(
+        trackBlocks,
+        switchBlock.id,
+        caseLabel,
+      )) {
+        this.state.status[child.id] = 'skipped';
+      }
+    }
+    this.flush();
+
+    let failed = false;
+    if (winningCase !== null) {
+      const winners = this.childrenOf(
+        trackBlocks,
+        switchBlock.id,
+        winningCase,
+      );
+      for (const child of winners) {
+        if (this.aborted) break;
+        await this.executeBlockOrGroup(containerId, trackBlocks, child, opts);
+        if (this.state.status[child.id] === 'error') {
+          failed = true;
+          break;
+        }
+      }
+    }
+
+    if (this.aborted) {
+      this.state.status[switchBlock.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[switchBlock.id] = 'error';
+    } else {
+      this.state.status[switchBlock.id] = 'ok';
     }
     this.flush();
   }

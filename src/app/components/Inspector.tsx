@@ -19,11 +19,18 @@ interface Props {
   /** Current scenario-scope variables (for the var picker). */
   scenarioVariables: Record<string, unknown>;
   /**
-   * Loop / branch blocks on the same container as the selected block
-   * that it can be nested inside. Empty for blocks that are
-   * themselves containers (we don't support nested containers yet).
+   * Loop / branch / switch blocks on the same container as the
+   * selected block that it can be nested inside. For containers
+   * with multiple cases (branch / switch), ``cases`` carries the
+   * available lane labels so the Inspector can render a matching
+   * dropdown for ``parentBranch``.
    */
-  availableContainers: Array<{ id: string; label: string; type: string }>;
+  availableContainers: Array<{
+    id: string;
+    label: string;
+    type: string;
+    cases: string[];
+  }>;
   /** Called when the user creates a new variable via the out-port helper. */
   onCreateVariable: (key: string, value: unknown) => void;
   onChange: (trackId: string, blockId: string, patch: Partial<Block>) => void;
@@ -224,40 +231,58 @@ export function Inspector({
                   parentBlockId: undefined,
                   parentBranch: undefined,
                 });
-              } else {
-                // Default to 'then' when nesting into a branch.
-                const target = availableContainers.find((c) => c.id === v);
-                onChange(trackId, block.id, {
-                  parentBlockId: v,
-                  parentBranch:
-                    target?.type === 'branch'
-                      ? (block.parentBranch ?? 'then')
-                      : undefined,
-                });
+                return;
               }
+              // Default the case label for multi-case containers
+              // (branch / switch) to the first available lane;
+              // loops don't use parentBranch at all.
+              const target = availableContainers.find((c) => c.id === v);
+              const defaultCase =
+                target && target.cases.length > 1 ? target.cases[0] : undefined;
+              onChange(trackId, block.id, {
+                parentBlockId: v,
+                parentBranch:
+                  defaultCase === undefined
+                    ? undefined
+                    : target?.cases.includes(block.parentBranch ?? '')
+                      ? block.parentBranch
+                      : defaultCase,
+              });
             }}
             options={[
               { value: '', label: '(なし)' },
               ...availableContainers.map((c) => ({
                 value: c.id,
-                label: `${c.type === 'loop' ? '↻' : '⑂'} ${c.label}`,
+                label: `${
+                  c.type === 'loop' ? '↻' : c.type === 'switch' ? '⧉' : '⑂'
+                } ${c.label}`,
               })),
             ]}
           />
           {block.parentBlockId &&
-            availableContainers.find((c) => c.id === block.parentBlockId)
-              ?.type === 'branch' && (
-              <Select<'then' | 'else'>
-                value={block.parentBranch ?? 'then'}
-                onValueChange={(side) =>
-                  onChange(trackId, block.id, { parentBranch: side })
-                }
-                options={[
-                  { value: 'then', label: 'TRUE 側 (条件一致)' },
-                  { value: 'else', label: 'FALSE 側 (条件不一致)' },
-                ]}
-              />
-            )}
+            (() => {
+              const parent = availableContainers.find(
+                (c) => c.id === block.parentBlockId,
+              );
+              if (!parent || parent.cases.length <= 1) return null;
+              return (
+                <Select<string>
+                  value={block.parentBranch ?? parent.cases[0]}
+                  onValueChange={(side) =>
+                    onChange(trackId, block.id, { parentBranch: side })
+                  }
+                  options={parent.cases.map((c) => ({
+                    value: c,
+                    label:
+                      parent.type === 'branch'
+                        ? c === 'then'
+                          ? 'TRUE 側 (条件一致)'
+                          : 'FALSE 側 (条件不一致)'
+                        : c,
+                  }))}
+                />
+              );
+            })()}
           {block.parentBlockId && (
             <span className="font-mono text-[8px] text-fl-text-ghost">
               親コンテナのボディとして実行されます
@@ -276,6 +301,14 @@ export function Inspector({
 
       {block.type === 'branch' && (
         <BranchParamsSection
+          block={block}
+          scenarioVariables={scenarioVariables}
+          onChange={(patch) => onChange(trackId, block.id, patch)}
+        />
+      )}
+
+      {block.type === 'switch' && (
+        <SwitchParamsSection
           block={block}
           scenarioVariables={scenarioVariables}
           onChange={(patch) => onChange(trackId, block.id, patch)}
@@ -649,6 +682,215 @@ function BranchParamsSection({
       <span className="font-mono text-[8px] leading-relaxed text-fl-text-ghost">
         TRUE 側 / FALSE 側 の分岐は内包ブロックのバッジで指定します
       </span>
+    </div>
+  );
+}
+
+interface SwitchParamsProps {
+  block: Block;
+  scenarioVariables: Record<string, unknown>;
+  onChange: (patch: Partial<Block>) => void;
+}
+
+/**
+ * Switch block editor.
+ *
+ * The switch evaluates ``params.expression`` (any JSON Logic) and
+ * runs the children whose ``parentBranch`` matches the first
+ * winning case from ``params.cases`` (string[]). A conventional
+ * ``"default"`` entry acts as the fallback.
+ *
+ * The UI gives you a ConditionBuilder-free expression editor (raw
+ * JSON textarea — most switches key off a single ``{ "var": "..." }``
+ * so a full ConditionBuilder is overkill here) and a case list
+ * you can add/rename/reorder/remove. Deleting a case cleans up
+ * ``parentBranch`` on children through the same onChange call site
+ * so orphaned lanes can't survive a rename. The first case in the
+ * list becomes the default lane new children land on.
+ */
+function SwitchParamsSection({
+  block,
+  onChange,
+}: SwitchParamsProps) {
+  const params =
+    (block.params as Record<string, unknown> | undefined) ?? {};
+  const cases: string[] = Array.isArray(params.cases)
+    ? (params.cases as unknown[]).map((c) => String(c))
+    : [];
+
+  const initialExpression =
+    params.expression === undefined
+      ? ''
+      : JSON.stringify(params.expression, null, 2);
+  const [localExpr, setLocalExpr] = useState(initialExpression);
+  const [exprError, setExprError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLocalExpr(initialExpression);
+    setExprError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [block.id, initialExpression]);
+
+  const commitExpression = () => {
+    const trimmed = localExpr.trim();
+    const nextParams: Record<string, unknown> = { ...params };
+    if (trimmed === '') {
+      delete nextParams.expression;
+      onChange({
+        params:
+          Object.keys(nextParams).length > 0 ? nextParams : undefined,
+      });
+      setExprError(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      nextParams.expression = parsed;
+      onChange({ params: nextParams });
+      setExprError(null);
+    } catch (e) {
+      setExprError((e as Error).message);
+    }
+  };
+
+  const commitCases = (nextCases: string[]) => {
+    const nextParams: Record<string, unknown> = { ...params };
+    nextParams.cases = nextCases;
+    onChange({ params: nextParams });
+  };
+
+  const updateCase = (idx: number, next: string) => {
+    const trimmed = next.trim();
+    if (trimmed === '') return;
+    if (cases.some((c, i) => i !== idx && c === trimmed)) return;
+    const nextCases = cases.slice();
+    nextCases[idx] = trimmed;
+    commitCases(nextCases);
+  };
+
+  const addCase = () => {
+    // Generate a unique default name so repeated clicks don't collide.
+    let i = cases.length;
+    let candidate = `case_${i}`;
+    while (cases.includes(candidate)) {
+      i++;
+      candidate = `case_${i}`;
+    }
+    commitCases([...cases, candidate]);
+  };
+
+  const addDefault = () => {
+    if (cases.includes('default')) return;
+    commitCases([...cases, 'default']);
+  };
+
+  const deleteCase = (idx: number) => {
+    commitCases(cases.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1">
+        <span className="font-mono text-[9px] text-fl-text-faint">
+          評価式 (JSON Logic)
+        </span>
+        <textarea
+          value={localExpr}
+          onChange={(e) => setLocalExpr(e.target.value)}
+          onBlur={commitExpression}
+          spellCheck={false}
+          rows={3}
+          placeholder='{ "var": "scenario.status" }'
+          className="resize-none rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[10px] leading-relaxed text-fl-text outline-none"
+        />
+        {exprError && (
+          <span className="font-mono text-[9px] text-[#ef4444]">
+            {exprError}
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[9px] text-fl-text-faint">
+            ケース一覧
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={addCase}
+              className="rounded border border-fl-border-2 bg-fl-panel-2 px-1.5 py-0.5 font-mono text-[9px] text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text"
+            >
+              + case
+            </button>
+            <button
+              type="button"
+              onClick={addDefault}
+              disabled={cases.includes('default')}
+              className="rounded border border-fl-border-2 bg-fl-panel-2 px-1.5 py-0.5 font-mono text-[9px] text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text disabled:opacity-40"
+            >
+              + default
+            </button>
+          </div>
+        </div>
+        {cases.length === 0 && (
+          <span className="font-mono text-[9px] text-fl-text-ghost">
+            `+ case` で最初のケースを追加
+          </span>
+        )}
+        {cases.map((c, i) => (
+          <SwitchCaseRow
+            key={`${c}-${i}`}
+            value={c}
+            onCommit={(next) => updateCase(i, next)}
+            onDelete={() => deleteCase(i)}
+          />
+        ))}
+      </div>
+      <span className="font-mono text-[8px] leading-relaxed text-fl-text-ghost">
+        評価式の値と一致したケースの内包ブロックを実行します。
+        どれにも一致しなければ <span className="text-fl-text-dim">default</span> のブロックが実行されます
+      </span>
+    </div>
+  );
+}
+
+interface SwitchCaseRowProps {
+  value: string;
+  onCommit: (next: string) => void;
+  onDelete: () => void;
+}
+
+function SwitchCaseRow({ value, onCommit, onDelete }: SwitchCaseRowProps) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => {
+    setLocal(value);
+  }, [value]);
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={() => {
+          if (local !== value) onCommit(local);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Escape') {
+            setLocal(value);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        className="min-w-0 flex-1 rounded border border-fl-border-2 bg-fl-bg px-1.5 py-0.5 font-mono text-[10px] text-fl-text outline-none"
+      />
+      <button
+        type="button"
+        onClick={onDelete}
+        className="text-fl-text-faint transition-colors hover:text-red-500"
+        title="ケースを削除"
+      >
+        ×
+      </button>
     </div>
   );
 }
