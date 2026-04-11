@@ -3,12 +3,7 @@ import {
   Square,
   Upload,
   Download,
-  Hexagon,
-  Box,
   BookOpen,
-  Undo2,
-  Redo2,
-  Link2,
   Sun,
   Moon,
 } from 'lucide-react';
@@ -17,8 +12,6 @@ import type { Theme } from '../useTheme';
 export type EditMode = 'block' | 'sync' | 'link';
 
 interface Props {
-  mode: EditMode;
-  onModeChange: (m: EditMode) => void;
   playing: boolean;
   onTogglePlay: () => void;
   onImport: () => void;
@@ -26,17 +19,11 @@ interface Props {
   onSample: () => void;
   scenarioName: string;
   onRenameScenario: (name: string) => void;
-  canUndo: boolean;
-  canRedo: boolean;
-  onUndo: () => void;
-  onRedo: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
 
 export function Toolbar({
-  mode,
-  onModeChange,
   playing,
   onTogglePlay,
   onImport,
@@ -44,10 +31,6 @@ export function Toolbar({
   onSample,
   scenarioName,
   onRenameScenario,
-  canUndo,
-  canRedo,
-  onUndo,
-  onRedo,
   theme,
   onToggleTheme,
 }: Props) {
@@ -75,64 +58,6 @@ export function Toolbar({
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-2">
-        <div className="flex overflow-hidden rounded-lg border border-fl-border-2">
-          <button
-            type="button"
-            onClick={onUndo}
-            disabled={!canUndo}
-            className="flex items-center gap-1 border-r border-fl-border-2 bg-fl-panel-2 px-2.5 py-1.5 font-mono text-[10px] font-bold text-fl-text-dim transition-colors hover:text-fl-text disabled:cursor-not-allowed disabled:text-fl-text-ghost disabled:hover:text-fl-text-ghost"
-            title="元に戻す (Ctrl+Z)"
-          >
-            <Undo2 className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={onRedo}
-            disabled={!canRedo}
-            className="flex items-center gap-1 bg-fl-panel-2 px-2.5 py-1.5 font-mono text-[10px] font-bold text-fl-text-dim transition-colors hover:text-fl-text disabled:cursor-not-allowed disabled:text-fl-text-ghost disabled:hover:text-fl-text-ghost"
-            title="やり直し (Ctrl+Shift+Z)"
-          >
-            <Redo2 className="h-3 w-3" />
-          </button>
-        </div>
-
-        <div className="flex overflow-hidden rounded-lg border border-fl-border-2 bg-fl-panel-2">
-          <button
-            type="button"
-            onClick={() => onModeChange('block')}
-            className="flex items-center gap-1 border-r border-fl-border-2 px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
-            style={{
-              background: mode === 'block' ? '#3b82f620' : 'transparent',
-              color: mode === 'block' ? '#3b82f6' : 'var(--fl-text-faint)',
-            }}
-          >
-            <Box className="h-3 w-3" /> ブロック追加
-          </button>
-          <button
-            type="button"
-            onClick={() => onModeChange('link')}
-            className="flex items-center gap-1 border-r border-fl-border-2 px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
-            style={{
-              background: mode === 'link' ? '#60a5fa20' : 'transparent',
-              color: mode === 'link' ? '#60a5fa' : 'var(--fl-text-faint)',
-            }}
-            title="2つのブロックをクリックして依存関係を作成"
-          >
-            <Link2 className="h-3 w-3" /> 依存リンク
-          </button>
-          <button
-            type="button"
-            onClick={() => onModeChange('sync')}
-            className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
-            style={{
-              background: mode === 'sync' ? '#f43f5e20' : 'transparent',
-              color: mode === 'sync' ? '#f43f5e' : 'var(--fl-text-faint)',
-            }}
-          >
-            <Hexagon className="h-3 w-3" /> 同期ポイント
-          </button>
-        </div>
-
         <button
           type="button"
           onClick={onSample}

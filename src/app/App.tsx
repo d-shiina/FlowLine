@@ -14,6 +14,7 @@ import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Titlebar } from './components/Titlebar';
 import { Toolbar, type EditMode } from './components/Toolbar';
+import { FloatingToolbox } from './components/FloatingToolbox';
 import { Ruler } from './components/Ruler';
 import { TrackRow } from './components/TrackRow';
 import { SyncLine } from './components/SyncLine';
@@ -518,8 +519,6 @@ export default function App() {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-fl-bg font-mono text-fl-text">
       <Titlebar />
       <Toolbar
-        mode={mode}
-        onModeChange={setMode}
         playing={playing}
         onTogglePlay={togglePlay}
         onImport={handleImport}
@@ -527,10 +526,6 @@ export default function App() {
         onSample={() => setSamplesOpen(true)}
         scenarioName={scenario.name}
         onRenameScenario={store.renameScenario}
-        canUndo={store.canUndo}
-        canRedo={store.canRedo}
-        onUndo={store.undo}
-        onRedo={store.redo}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -595,7 +590,8 @@ export default function App() {
             setLinkSource(null);
           }}
         />
-        <div className="fl-scroll min-h-0 flex-1 overflow-auto">
+        <div className="relative min-h-0 flex-1">
+          <div className="fl-scroll absolute inset-0 overflow-auto">
           {editorMode.type === 'subroutine' && subroutineTrack && (
             <div className="flex items-center gap-2 border-b border-fl-border bg-fl-panel px-4 py-2">
               <button
@@ -805,6 +801,15 @@ export default function App() {
               )
             )}
           </div>
+          </div>
+          <FloatingToolbox
+            mode={mode}
+            onModeChange={setMode}
+            canUndo={store.canUndo}
+            canRedo={store.canRedo}
+            onUndo={store.undo}
+            onRedo={store.redo}
+          />
         </div>
 
         <Inspector
