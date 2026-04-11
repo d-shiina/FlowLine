@@ -16,9 +16,9 @@ interface Props {
  * that used to live in the top Toolbar, so the scenario name and the
  * run button up top stay uncluttered.
  *
- * Vertical column at the top-left of the chart area, mirroring the
- * "tools palette" pattern from drawing and CAD apps. The parent must
- * be `position: relative` with enough room — App wraps the scroll
+ * Vertical column pinned to the top-right of the chart area, mirroring
+ * the "tools palette" pattern from drawing and CAD apps. The parent
+ * must be `position: relative` with enough room — App wraps the scroll
  * viewport for exactly this purpose.
  */
 export function FloatingToolbox({
@@ -61,7 +61,7 @@ export function FloatingToolbox({
 
   return (
     <div
-      className="pointer-events-none absolute top-3 left-3 z-20 flex flex-col gap-2"
+      className="pointer-events-none absolute top-3 right-3 z-20 flex flex-col gap-2"
       aria-label="編集ツール"
     >
       {/* Undo / Redo group */}
