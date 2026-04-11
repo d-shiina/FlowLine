@@ -7,7 +7,7 @@ import {
   SLOT_PX,
   TRACK_H,
 } from './layout';
-import { useScenario } from './useScenario';
+import { useScenario, uid } from './useScenario';
 import type { Block, Scenario } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Toolbar, type EditMode } from './components/Toolbar';
@@ -184,11 +184,45 @@ export default function App() {
     [store],
   );
 
+  // ─── copy / paste clipboard ────────────────────────────────────────
+  const clipboardRef = useRef<Block | null>(null);
+
+  const pasteFromClipboard = useCallback(() => {
+    const src = clipboardRef.current;
+    if (!src) return;
+    // Destination: same container as selection, one slot after selected
+    // block. If nothing selected, drop on the first track at slot 0.
+    let targetId: string | undefined;
+    let targetSlot = 0;
+    if (selected && selectedBlock) {
+      targetId = selected.trackId;
+      targetSlot = selectedBlock.slot + 1;
+    } else if (scenario.tracks.length > 0) {
+      targetId = scenario.tracks[0].id;
+      targetSlot = 0;
+    }
+    if (!targetId) return;
+    const newBlock: Block = {
+      ...src,
+      id: uid('b'),
+      slot: targetSlot,
+      // Drop deps — pasted blocks may land in a different track where the
+      // original deps don't make sense; user can re-link explicitly.
+      deps: [],
+    };
+    store.addBlock(targetId, newBlock);
+    setSelected({ trackId: targetId, blockId: newBlock.id });
+  }, [selected, selectedBlock, scenario.tracks, store]);
+
   // ─── keyboard shortcuts ───────────────────────────────────────────
-  // Delete/Backspace: delete selected block
-  // Escape: deselect
-  // Ctrl/Cmd+S: export JSON
-  // Ctrl/Cmd+O: trigger file picker
+  // Delete/Backspace  → delete selected block
+  // Escape            → deselect
+  // Ctrl/Cmd + S      → export JSON
+  // Ctrl/Cmd + O      → import JSON
+  // Ctrl/Cmd + Z      → undo
+  // Ctrl/Cmd + Shift+Z or Ctrl+Y → redo
+  // Ctrl/Cmd + C      → copy selected block to clipboard
+  // Ctrl/Cmd + V      → paste after selection
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -212,6 +246,32 @@ export default function App() {
         setSelected(null);
         return;
       }
+      if (ctrl && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        store.undo();
+        return;
+      }
+      if (
+        ctrl &&
+        ((e.shiftKey && e.key.toLowerCase() === 'z') ||
+          e.key.toLowerCase() === 'y')
+      ) {
+        e.preventDefault();
+        store.redo();
+        return;
+      }
+      if (ctrl && e.key.toLowerCase() === 'c' && selectedBlock) {
+        e.preventDefault();
+        clipboardRef.current = JSON.parse(
+          JSON.stringify(selectedBlock),
+        ) as Block;
+        return;
+      }
+      if (ctrl && e.key.toLowerCase() === 'v' && clipboardRef.current) {
+        e.preventDefault();
+        pasteFromClipboard();
+        return;
+      }
       if (ctrl && e.key.toLowerCase() === 's') {
         e.preventDefault();
         handleExport();
@@ -225,7 +285,14 @@ export default function App() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [selected, store, handleExport, handleImport]);
+  }, [
+    selected,
+    selectedBlock,
+    store,
+    handleExport,
+    handleImport,
+    pasteFromClipboard,
+  ]);
 
   // ─── render ────────────────────────────────────────────────────────
   const canvasWidth = totalSlots * SLOT_PX + HEADER_W;
@@ -244,6 +311,12 @@ export default function App() {
         onImport={handleImport}
         onExport={handleExport}
         onSample={() => setSamplesOpen(true)}
+        scenarioName={scenario.name}
+        onRenameScenario={store.renameScenario}
+        canUndo={store.canUndo}
+        canRedo={store.canRedo}
+        onUndo={store.undo}
+        onRedo={store.redo}
       />
 
       <input

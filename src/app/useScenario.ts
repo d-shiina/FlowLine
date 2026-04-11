@@ -39,6 +39,10 @@ function cascadeDeleteDep(s: Scenario, blockId: string): Scenario {
       ...s.errorHandler,
       blocks: s.errorHandler.blocks.map(filterBlock),
     },
+    subroutines: s.subroutines.map((sub) => ({
+      ...sub,
+      blocks: sub.blocks.map(filterBlock),
+    })),
     syncPoints: s.syncPoints.map((sp) => ({
       ...sp,
       deps: filterDeps(sp.deps),
@@ -64,9 +68,23 @@ function mapTrack(
   };
 }
 
+const HISTORY_LIMIT = 50;
+
+interface HistoryState {
+  scenario: Scenario;
+  history: Scenario[];
+  future: Scenario[];
+}
+
 export interface ScenarioStore {
   scenario: Scenario;
+  canUndo: boolean;
+  canRedo: boolean;
   replace: (s: Scenario) => void;
+  undo: () => void;
+  redo: () => void;
+
+  renameScenario: (name: string) => void;
 
   addTrack: () => void;
   deleteTrack: (id: string) => void;
@@ -89,28 +107,79 @@ export interface ScenarioStore {
 }
 
 export function useScenario(): ScenarioStore {
-  const [scenario, setScenario] = useState<Scenario>(() =>
-    cloneSample(DEFAULT_SAMPLE),
-  );
+  const [state, setState] = useState<HistoryState>(() => ({
+    scenario: cloneSample(DEFAULT_SAMPLE),
+    history: [],
+    future: [],
+  }));
 
-  const replace = useCallback((incoming: Scenario) => {
-    // Backward-compat: JSON saved before the errorHandler field existed.
-    const withHandler: Scenario = incoming.errorHandler
-      ? incoming
-      : {
-          ...incoming,
-          errorHandler: {
-            id: ERROR_HANDLER_ID,
-            name: 'エラー処理',
-            color: ERROR_HANDLER_COLOR,
-            blocks: [],
-          },
-        };
-    setScenario(withHandler);
+  /**
+   * Apply an updater. If the updater returns the same reference as the
+   * current scenario, skip history push (no-op). Otherwise push the
+   * previous scenario onto history and clear the redo stack.
+   */
+  const commit = useCallback((updater: (s: Scenario) => Scenario) => {
+    setState((prev) => {
+      const next = updater(prev.scenario);
+      if (next === prev.scenario) return prev;
+      const history = [...prev.history, prev.scenario];
+      if (history.length > HISTORY_LIMIT) history.shift();
+      return { scenario: next, history, future: [] };
+    });
   }, []);
 
+  const undo = useCallback(() => {
+    setState((prev) => {
+      if (prev.history.length === 0) return prev;
+      const past = prev.history[prev.history.length - 1];
+      return {
+        scenario: past,
+        history: prev.history.slice(0, -1),
+        future: [...prev.future, prev.scenario],
+      };
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setState((prev) => {
+      if (prev.future.length === 0) return prev;
+      const next = prev.future[prev.future.length - 1];
+      return {
+        scenario: next,
+        history: [...prev.history, prev.scenario],
+        future: prev.future.slice(0, -1),
+      };
+    });
+  }, []);
+
+  const replace = useCallback(
+    (incoming: Scenario) => {
+      // Backward-compat: JSON saved before the errorHandler field existed.
+      const withHandler: Scenario = incoming.errorHandler
+        ? incoming
+        : {
+            ...incoming,
+            errorHandler: {
+              id: ERROR_HANDLER_ID,
+              name: 'エラー処理',
+              color: ERROR_HANDLER_COLOR,
+              blocks: [],
+            },
+          };
+      commit(() => withHandler);
+    },
+    [commit],
+  );
+
+  const renameScenario = useCallback(
+    (name: string) => {
+      commit((s) => (s.name === name ? s : { ...s, name }));
+    },
+    [commit],
+  );
+
   const addTrack = useCallback(() => {
-    setScenario((s) => {
+    commit((s) => {
       const color = TRACK_COLORS[s.tracks.length % TRACK_COLORS.length];
       const t: Track = {
         id: uid('track'),
@@ -120,38 +189,47 @@ export function useScenario(): ScenarioStore {
       };
       return { ...s, tracks: [...s.tracks, t] };
     });
-  }, []);
+  }, [commit]);
 
-  const deleteTrack = useCallback((id: string) => {
-    setScenario((s) => {
-      if (id === ERROR_HANDLER_ID) return s; // cannot delete the error handler
-      if (s.tracks.length <= 1) return s;
-      return { ...s, tracks: s.tracks.filter((t) => t.id !== id) };
-    });
-  }, []);
+  const deleteTrack = useCallback(
+    (id: string) => {
+      commit((s) => {
+        if (id === ERROR_HANDLER_ID) return s; // cannot delete the error handler
+        if (s.tracks.length <= 1) return s;
+        return { ...s, tracks: s.tracks.filter((t) => t.id !== id) };
+      });
+    },
+    [commit],
+  );
 
-  const renameTrack = useCallback((id: string, name: string) => {
-    setScenario((s) => {
-      if (id === ERROR_HANDLER_ID) return s; // name is fixed
-      return {
-        ...s,
-        tracks: s.tracks.map((t) => (t.id === id ? { ...t, name } : t)),
-      };
-    });
-  }, []);
+  const renameTrack = useCallback(
+    (id: string, name: string) => {
+      commit((s) => {
+        if (id === ERROR_HANDLER_ID) return s; // name is fixed
+        return {
+          ...s,
+          tracks: s.tracks.map((t) => (t.id === id ? { ...t, name } : t)),
+        };
+      });
+    },
+    [commit],
+  );
 
-  const addBlock = useCallback((trackId: string, block: Block) => {
-    setScenario((s) =>
-      mapTrack(s, trackId, (t) => {
-        const withRoom = makeRoomAt(t.blocks, block.slot);
-        return { ...t, blocks: [...withRoom, block] };
-      }),
-    );
-  }, []);
+  const addBlock = useCallback(
+    (trackId: string, block: Block) => {
+      commit((s) =>
+        mapTrack(s, trackId, (t) => {
+          const withRoom = makeRoomAt(t.blocks, block.slot);
+          return { ...t, blocks: [...withRoom, block] };
+        }),
+      );
+    },
+    [commit],
+  );
 
   const updateBlock = useCallback(
     (trackId: string, blockId: string, patch: Partial<Block>) => {
-      setScenario((s) =>
+      commit((s) =>
         mapTrack(s, trackId, (t) => {
           const current = t.blocks.find((b) => b.id === blockId);
           if (!current) return t;
@@ -169,73 +247,96 @@ export function useScenario(): ScenarioStore {
         }),
       );
     },
-    [],
+    [commit],
   );
 
-  const deleteBlock = useCallback((trackId: string, blockId: string) => {
-    setScenario((s) => {
-      const removed = mapTrack(s, trackId, (t) => ({
-        ...t,
-        blocks: t.blocks.filter((b) => b.id !== blockId),
-      }));
-      return cascadeDeleteDep(removed, blockId);
-    });
-  }, []);
-
-  const addSync = useCallback((sp: SyncPoint) => {
-    setScenario((s) => ({ ...s, syncPoints: [...s.syncPoints, sp] }));
-  }, []);
-
-  const deleteSync = useCallback((id: string) => {
-    setScenario((s) => ({
-      ...s,
-      syncPoints: s.syncPoints.filter((sp) => sp.id !== id),
-    }));
-  }, []);
-
-  const addSubroutine = useCallback((name: string): Subroutine => {
-    const sub: Subroutine = {
-      id: uid('sub'),
-      name: name.trim() || 'サブルーチン',
-      blocks: [],
-    };
-    setScenario((s) => ({ ...s, subroutines: [...s.subroutines, sub] }));
-    return sub;
-  }, []);
-
-  const renameSubroutine = useCallback((id: string, name: string) => {
-    setScenario((s) => ({
-      ...s,
-      subroutines: s.subroutines.map((sub) =>
-        sub.id === id ? { ...sub, name: name.trim() || sub.name } : sub,
-      ),
-    }));
-  }, []);
-
-  const deleteSubroutine = useCallback((id: string) => {
-    setScenario((s) => {
-      // Cascade: clear `subroutineId` on any block that referenced this
-      // subroutine, across regular tracks and the error handler.
-      const clearRef = (b: Block): Block =>
-        b.subroutineId === id ? { ...b, subroutineId: undefined } : b;
-      return {
-        ...s,
-        subroutines: s.subroutines.filter((sub) => sub.id !== id),
-        tracks: s.tracks.map((t) => ({
+  const deleteBlock = useCallback(
+    (trackId: string, blockId: string) => {
+      commit((s) => {
+        const removed = mapTrack(s, trackId, (t) => ({
           ...t,
-          blocks: t.blocks.map(clearRef),
-        })),
-        errorHandler: {
-          ...s.errorHandler,
-          blocks: s.errorHandler.blocks.map(clearRef),
-        },
+          blocks: t.blocks.filter((b) => b.id !== blockId),
+        }));
+        return cascadeDeleteDep(removed, blockId);
+      });
+    },
+    [commit],
+  );
+
+  const addSync = useCallback(
+    (sp: SyncPoint) => {
+      commit((s) => ({ ...s, syncPoints: [...s.syncPoints, sp] }));
+    },
+    [commit],
+  );
+
+  const deleteSync = useCallback(
+    (id: string) => {
+      commit((s) => ({
+        ...s,
+        syncPoints: s.syncPoints.filter((sp) => sp.id !== id),
+      }));
+    },
+    [commit],
+  );
+
+  const addSubroutine = useCallback(
+    (name: string): Subroutine => {
+      const sub: Subroutine = {
+        id: uid('sub'),
+        name: name.trim() || 'サブルーチン',
+        blocks: [],
       };
-    });
-  }, []);
+      commit((s) => ({ ...s, subroutines: [...s.subroutines, sub] }));
+      return sub;
+    },
+    [commit],
+  );
+
+  const renameSubroutine = useCallback(
+    (id: string, name: string) => {
+      commit((s) => ({
+        ...s,
+        subroutines: s.subroutines.map((sub) =>
+          sub.id === id ? { ...sub, name: name.trim() || sub.name } : sub,
+        ),
+      }));
+    },
+    [commit],
+  );
+
+  const deleteSubroutine = useCallback(
+    (id: string) => {
+      commit((s) => {
+        // Cascade: clear `subroutineId` on any block that referenced this
+        // subroutine, across regular tracks and the error handler.
+        const clearRef = (b: Block): Block =>
+          b.subroutineId === id ? { ...b, subroutineId: undefined } : b;
+        return {
+          ...s,
+          subroutines: s.subroutines.filter((sub) => sub.id !== id),
+          tracks: s.tracks.map((t) => ({
+            ...t,
+            blocks: t.blocks.map(clearRef),
+          })),
+          errorHandler: {
+            ...s.errorHandler,
+            blocks: s.errorHandler.blocks.map(clearRef),
+          },
+        };
+      });
+    },
+    [commit],
+  );
 
   return {
-    scenario,
+    scenario: state.scenario,
+    canUndo: state.history.length > 0,
+    canRedo: state.future.length > 0,
     replace,
+    undo,
+    redo,
+    renameScenario,
     addTrack,
     deleteTrack,
     renameTrack,

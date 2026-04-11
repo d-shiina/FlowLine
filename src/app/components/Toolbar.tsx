@@ -7,6 +7,8 @@ import {
   Hexagon,
   Box,
   BookOpen,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 
 export type EditMode = 'block' | 'sync';
@@ -20,6 +22,12 @@ interface Props {
   onImport: () => void;
   onExport: () => void;
   onSample: () => void;
+  scenarioName: string;
+  onRenameScenario: (name: string) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
 export function Toolbar({
@@ -31,24 +39,55 @@ export function Toolbar({
   onImport,
   onExport,
   onSample,
+  scenarioName,
+  onRenameScenario,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: Props) {
   return (
-    <div className="flex flex-shrink-0 items-center justify-between border-b border-[#0f172a] bg-[#0a1020] px-5 py-3">
-      <div className="flex items-center gap-2.5">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] text-[13px]">
+    <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-[#0f172a] bg-[#0a1020] px-5 py-3">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] text-[13px]">
           <Play className="h-3.5 w-3.5 fill-white stroke-white" />
         </div>
-        <div>
+        <div className="flex min-w-0 flex-col">
           <div className="text-[13px] font-bold tracking-wider text-slate-100">
             FLOWLINE
           </div>
-          <div className="text-[9px] text-slate-600">
-            Block-based Multi-Track RPA Editor
-          </div>
+          <input
+            value={scenarioName}
+            onChange={(e) => onRenameScenario(e.target.value)}
+            placeholder="シナリオ名"
+            className="w-44 truncate bg-transparent font-mono text-[10px] text-slate-500 outline-none placeholder-slate-700 focus:text-slate-300"
+            title="シナリオ名 (クリックで編集)"
+          />
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-shrink-0 items-center gap-2">
+        <div className="flex overflow-hidden rounded-lg border border-[#1e293b]">
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={!canUndo}
+            className="flex items-center gap-1 border-r border-[#1e293b] bg-[#0f172a] px-2.5 py-1.5 font-mono text-[10px] font-bold text-slate-400 transition-colors hover:text-slate-200 disabled:cursor-not-allowed disabled:text-slate-700 disabled:hover:text-slate-700"
+            title="元に戻す (Ctrl+Z)"
+          >
+            <Undo2 className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={onRedo}
+            disabled={!canRedo}
+            className="flex items-center gap-1 bg-[#0f172a] px-2.5 py-1.5 font-mono text-[10px] font-bold text-slate-400 transition-colors hover:text-slate-200 disabled:cursor-not-allowed disabled:text-slate-700 disabled:hover:text-slate-700"
+            title="やり直し (Ctrl+Shift+Z)"
+          >
+            <Redo2 className="h-3 w-3" />
+          </button>
+        </div>
+
         <div className="flex overflow-hidden rounded-lg border border-[#1e293b] bg-[#0f172a]">
           <button
             type="button"
