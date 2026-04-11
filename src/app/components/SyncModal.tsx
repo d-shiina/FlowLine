@@ -24,17 +24,16 @@ export function SyncModal({ open, onOpenChange, slot, tracks, onAdd }: Props) {
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const handleAdd = () => {
-    // infer deps: for each selected track, find the rightmost block that
-    // ends at or before the sync slot.
+    // infer deps: for each selected track, find the rightmost block whose
+    // slot is strictly before the sync slot.
     const deps: string[] = [];
     for (const tid of selected) {
       const track = tracks.find((t) => t.id === tid);
       if (!track) continue;
-      let best: { id: string; end: number } | null = null;
+      let best: { id: string; slot: number } | null = null;
       for (const b of track.blocks) {
-        const end = b.slot + b.span;
-        if (end <= slot && (!best || end > best.end)) {
-          best = { id: b.id, end };
+        if (b.slot < slot && (!best || b.slot > best.slot)) {
+          best = { id: b.id, slot: b.slot };
         }
       }
       if (best) deps.push(best.id);

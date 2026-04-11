@@ -23,6 +23,22 @@ const ACTION_LABELS = [
   'キー送信',
 ];
 
+function defaultLabel(type: BlockType): string {
+  switch (type) {
+    case 'loop':
+      return 'ループ';
+    case 'branch':
+      return '分岐';
+    case 'wait':
+      return '待機';
+    case 'subroutine':
+      return 'サブルーチン';
+    case 'action':
+    default:
+      return 'アクション';
+  }
+}
+
 export function AddBlockModal({
   open,
   onOpenChange,
@@ -34,29 +50,14 @@ export function AddBlockModal({
   const [type, setType] = useState<BlockType>('action');
   const [label, setLabel] = useState('クリック');
   const [custom, setCustom] = useState('');
-  const [span, setSpan] = useState(1);
 
   const handleAdd = () => {
-    const finalLabel =
-      custom ||
-      label ||
-      (type === 'loop'
-        ? 'ループ'
-        : type === 'branch'
-          ? '分岐'
-          : type === 'wait'
-            ? '待機'
-            : type === 'sync'
-              ? '同期'
-              : type === 'subroutine'
-                ? 'サブルーチン'
-                : 'アクション');
+    const finalLabel = custom || label || defaultLabel(type);
     onAdd({
       id: uid('b'),
       type,
       label: finalLabel,
       slot,
-      span,
       deps: [],
     });
     setCustom('');
@@ -77,30 +78,32 @@ export function AddBlockModal({
           </Dialog.Description>
 
           <div className="mb-4 flex flex-wrap gap-1.5">
-            {(Object.entries(BLOCK_META) as Array<[BlockType, typeof BLOCK_META[BlockType]]>).map(
-              ([key, m]) => {
-                const selected = type === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setType(key)}
-                    className="flex-auto rounded-lg border-[1.5px] px-1 py-1 font-mono text-[10px] font-bold transition-colors"
-                    style={{
-                      borderColor: selected ? m.color : '#334155',
-                      background: selected ? `${m.color}20` : 'transparent',
-                      color: selected ? m.color : '#475569',
-                    }}
-                  >
-                    {m.icon} {m.label}
-                  </button>
-                );
-              },
-            )}
+            {(
+              Object.entries(BLOCK_META) as Array<
+                [BlockType, (typeof BLOCK_META)[BlockType]]
+              >
+            ).map(([key, m]) => {
+              const selected = type === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setType(key)}
+                  className="flex-auto rounded-lg border-[1.5px] px-1 py-1 font-mono text-[10px] font-bold transition-colors"
+                  style={{
+                    borderColor: selected ? m.color : '#334155',
+                    background: selected ? `${m.color}20` : 'transparent',
+                    color: selected ? m.color : '#475569',
+                  }}
+                >
+                  {m.icon} {m.label}
+                </button>
+              );
+            })}
           </div>
 
           {(type === 'action' || type === 'wait') && (
-            <div className="mb-3">
+            <div className="mb-5">
               <div className="mb-1.5 font-mono text-[10px] text-slate-600">ラベル</div>
               <div className="mb-2 flex flex-wrap gap-1">
                 {ACTION_LABELS.map((l) => {
@@ -131,33 +134,11 @@ export function AddBlockModal({
             </div>
           )}
 
-          {type !== 'sync' && (
-            <div className="mb-5">
-              <div className="mb-1.5 font-mono text-[10px] text-slate-600">
-                スパン: <span className="text-slate-400">{span} slot</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={1}
-                  max={12}
-                  value={span}
-                  onChange={(e) => setSpan(Number(e.target.value))}
-                  className="flex-1 accent-[#3B82F6]"
-                />
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={span}
-                  onChange={(e) => setSpan(Math.max(1, Number(e.target.value)))}
-                  className="w-14 rounded-md border border-[#334155] bg-[#0f172a] px-1.5 py-1 text-center font-mono text-[11px] text-slate-200 outline-none"
-                />
-              </div>
-            </div>
-          )}
+          <div className="mb-1 font-mono text-[9px] text-slate-700">
+            タイムアウトやエラー処理は、追加後に右サイドの Inspector で調整できます
+          </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="mt-4 flex justify-end gap-2">
             <Dialog.Close className="rounded-lg border border-[#334155] bg-transparent px-4 py-1.5 text-[12px] text-slate-600">
               キャンセル
             </Dialog.Close>

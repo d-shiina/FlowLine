@@ -1,16 +1,24 @@
 import { useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import type { Block, Track } from '../types';
 import { HEADER_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
 import { BlockView } from './BlockView';
+
+type Variant = 'normal' | 'error';
 
 interface Props {
   track: Track;
   totalSlots: number;
   playheadSlot: number;
   selectedBlockId: string | null;
+  variant?: Variant;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  onUpdateBlock: (trackId: string, blockId: string, patch: Partial<Block>) => void;
+  onUpdateBlock: (
+    trackId: string,
+    blockId: string,
+    patch: Partial<Block>,
+  ) => void;
   onDeleteBlock: (trackId: string, blockId: string) => void;
   onSelectBlock: (trackId: string, blockId: string) => void;
   onCanvasClick: (trackId: string, slot: number) => void;
@@ -21,6 +29,7 @@ export function TrackRow({
   totalSlots,
   playheadSlot,
   selectedBlockId,
+  variant = 'normal',
   onRename,
   onDelete,
   onUpdateBlock,
@@ -30,6 +39,7 @@ export function TrackRow({
 }: Props) {
   const [renaming, setRenaming] = useState(false);
   const [nameVal, setNameVal] = useState(track.name);
+  const isError = variant === 'error';
 
   const commitRename = () => {
     onRename(track.id, nameVal.trim() || track.name);
@@ -50,13 +60,23 @@ export function TrackRow({
     >
       {/* header */}
       <div
-        className="flex flex-shrink-0 flex-col justify-between bg-[#0a1020] px-3 py-2"
+        className="flex flex-shrink-0 flex-col justify-between px-3 py-2"
         style={{
           width: HEADER_W,
-          borderRight: `3px solid ${track.color}`,
+          background: isError ? '#18090d' : '#0a1020',
+          borderRight: `${isError ? 4 : 3}px solid ${track.color}`,
         }}
       >
-        {renaming ? (
+        {isError ? (
+          <div
+            className="flex items-center gap-1.5 font-mono text-[11px] font-bold"
+            style={{ color: track.color }}
+            title="エラー処理トラック"
+          >
+            <AlertTriangle className="h-3 w-3" />
+            エラー処理
+          </div>
+        ) : renaming ? (
           <input
             autoFocus
             value={nameVal}
@@ -84,16 +104,29 @@ export function TrackRow({
           </button>
         )}
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[9px] text-slate-600">
-            {track.blocks.length} blocks
-          </span>
-          <button
-            type="button"
-            onClick={() => onDelete(track.id)}
-            className="font-mono text-[9px] text-slate-600 transition-colors hover:text-red-500"
+          <span
+            className="font-mono text-[9px]"
+            style={{
+              color: isError
+                ? track.blocks.length === 0
+                  ? '#f43f5e88'
+                  : '#f43f5ecc'
+                : '#64748b',
+            }}
           >
-            × 削除
-          </button>
+            {isError && track.blocks.length === 0
+              ? '空 = 即停止'
+              : `${track.blocks.length} blocks`}
+          </span>
+          {!isError && (
+            <button
+              type="button"
+              onClick={() => onDelete(track.id)}
+              className="font-mono text-[9px] text-slate-600 transition-colors hover:text-red-500"
+            >
+              × 削除
+            </button>
+          )}
         </div>
       </div>
 
@@ -102,7 +135,7 @@ export function TrackRow({
         className="relative"
         style={{
           width: totalSlots * SLOT_PX,
-          background: '#060c1a',
+          background: isError ? '#0a0406' : '#060c1a',
           cursor: 'cell',
         }}
         onClick={handleCanvasClick}
@@ -114,15 +147,24 @@ export function TrackRow({
         ).map((t) => (
           <div
             key={t}
-            className="pointer-events-none absolute top-0 h-full w-px bg-[#0f172a]"
-            style={{ left: t * SLOT_PX }}
+            className="pointer-events-none absolute top-0 h-full w-px"
+            style={{
+              left: t * SLOT_PX,
+              background: isError ? '#1a0609' : '#0f172a',
+            }}
           />
         ))}
 
+        {/* empty hint for error handler */}
+        {isError && track.blocks.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[10px] text-[#f43f5e55]">
+            + エラー時のクリーンアップ・通知を配置（クリック）
+          </div>
+        )}
+
         {track.blocks.map((b) => {
-          const active =
-            playheadSlot >= b.slot && playheadSlot < b.slot + b.span;
-          const past = playheadSlot >= b.slot + b.span;
+          const active = playheadSlot >= b.slot && playheadSlot < b.slot + 1;
+          const past = playheadSlot >= b.slot + 1;
           return (
             <BlockView
               key={b.id}

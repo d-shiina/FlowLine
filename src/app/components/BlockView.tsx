@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BLOCK_META, type Block } from '../types';
-import { SLOT_PX, TRACK_H, pxToSlot } from '../layout';
+import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
 
 interface Props {
   block: Block;
@@ -13,9 +13,64 @@ interface Props {
   onDelete: (trackId: string, blockId: string) => void;
 }
 
+interface Badge {
+  key: string;
+  icon: string;
+  color: string;
+  tooltip: string;
+}
+
 /**
- * A single block rendered on its track. Drag body to move, drag right edge
- * to resize (change span). Position is measured in slots, not seconds.
+ * Derive visual badges for block attributes that deviate from defaults.
+ * Default attributes get no badge so the timeline stays quiet.
+ */
+function computeBadges(block: Block): Badge[] {
+  const badges: Badge[] = [];
+  if (block.skipIfMissing) {
+    badges.push({
+      key: 'skip-if-missing',
+      icon: '?',
+      color: '#eab308',
+      tooltip: 'ターゲットが見つからなくてもOK',
+    });
+  }
+  if (typeof block.onError === 'object' && 'retry' in block.onError) {
+    badges.push({
+      key: 'retry',
+      icon: `↻${block.onError.retry}`,
+      color: '#60a5fa',
+      tooltip: `${block.onError.retry}回リトライ`,
+    });
+  } else if (block.onError === 'skip') {
+    badges.push({
+      key: 'on-error-skip',
+      icon: '→',
+      color: '#a855f7',
+      tooltip: 'エラーでもスキップ',
+    });
+  } else if (block.onError === 'ignore') {
+    badges.push({
+      key: 'on-error-ignore',
+      icon: '∅',
+      color: '#64748b',
+      tooltip: 'エラーを無視',
+    });
+  }
+  if (block.timeout !== undefined && block.timeout >= 60) {
+    badges.push({
+      key: 'timeout',
+      icon: '⏱',
+      color: '#06b6d4',
+      tooltip: `タイムアウト ${block.timeout}s`,
+    });
+  }
+  return badges;
+}
+
+/**
+ * A single block rendered at its `slot` position. Drag body to change slot;
+ * collisions are resolved by the scenario store (shift-right chain).
+ * Fixed width — span was removed (see docs/01-concept.md).
  */
 export function BlockView({
   block,
@@ -30,8 +85,8 @@ export function BlockView({
   const meta = BLOCK_META[block.type];
   const [hov, setHov] = useState(false);
 
-  const left = block.slot * SLOT_PX;
-  const width = Math.max(block.span * SLOT_PX - 8, 56);
+  const left = block.slot * SLOT_PX + BLOCK_MARGIN;
+  const width = BLOCK_W;
 
   const handleDragStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -54,25 +109,7 @@ export function BlockView({
     window.addEventListener('mouseup', onUp);
   };
 
-  const handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const origSpan = block.span;
-    const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const newSpan = Math.max(1, origSpan + pxToSlot(dx));
-      if (newSpan !== block.span) {
-        onUpdate(trackId, block.id, { span: newSpan });
-      }
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
+  const badges = computeBadges(block);
 
   return (
     <div
@@ -113,7 +150,7 @@ export function BlockView({
         onSelect(trackId, block.id);
       }}
     >
-      <div className="flex h-full flex-col justify-center gap-0.5">
+      <div className="flex h-full flex-col justify-center gap-0.5 pr-1">
         <div
           className="font-mono text-[8px] font-bold tracking-wider"
           style={{ color: meta.color }}
@@ -123,20 +160,31 @@ export function BlockView({
         <div
           className="truncate font-mono text-[11px]"
           style={{ color: past ? '#334155' : '#cbd5e1' }}
+          title={block.label}
         >
           {block.label}
         </div>
-        {width > 80 && (
-          <div className="font-mono text-[8px]" style={{ color: `${meta.color}99` }}>
-            span {block.span}
-          </div>
-        )}
       </div>
+
+      {badges.length > 0 && (
+        <div className="pointer-events-none absolute left-1 bottom-1 flex gap-0.5">
+          {badges.map((b) => (
+            <span
+              key={b.key}
+              title={b.tooltip}
+              className="pointer-events-auto flex h-3 items-center justify-center rounded px-0.5 font-mono text-[8px] font-bold leading-none"
+              style={{ background: `${b.color}2a`, color: b.color }}
+            >
+              {b.icon}
+            </span>
+          ))}
+        </div>
+      )}
 
       {hov && (
         <button
           type="button"
-          className="absolute right-3 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[9px] text-white"
+          className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[9px] text-white"
           onMouseDown={(e) => {
             e.stopPropagation();
             onDelete(trackId, block.id);
@@ -146,18 +194,6 @@ export function BlockView({
           ×
         </button>
       )}
-
-      <div
-        className="absolute right-0 top-0 bottom-0 flex w-2 cursor-ew-resize items-center justify-center"
-        onMouseDown={handleResizeStart}
-      >
-        {hov && (
-          <div
-            className="h-3 w-0.5 rounded-sm"
-            style={{ background: `${meta.color}aa` }}
-          />
-        )}
-      </div>
     </div>
   );
 }

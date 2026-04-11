@@ -1,31 +1,55 @@
 /**
  * FLOWLINE scenario model.
  *
- * Unlike the seconds-based prototype, this model uses a block-based axis:
- * a block's horizontal position is its index (slot) within a track, and
- * "duration" is instead a visual width hint (number of slots). Execution
- * order is defined by `deps` (DAG edges), not by position.
+ * The horizontal axis is block-based: each block occupies exactly one slot
+ * (1 slot = 1 logical step). Execution order is defined by `deps` (DAG
+ * edges), not by position. A block's `slot` is purely for visual layout,
+ * and the renderer guarantees no two blocks on the same track share a slot.
+ *
+ * Error handling follows a 3-layer model — see docs/02-error-handling.md.
  */
 
-export type BlockType = 'action' | 'wait' | 'loop' | 'branch' | 'sync' | 'subroutine';
+export type BlockType = 'action' | 'wait' | 'loop' | 'branch' | 'subroutine';
+
+/**
+ * Per-block error policy.
+ *
+ * - `abort`  (default)  escalate to scenario-wide cancel + error handler track
+ * - `skip`   log a warning and continue to the next block
+ * - `ignore` silently continue (for expected misses)
+ * - retry    try up to `retry` times, then fall through to `then`
+ *
+ * Note: `skipIfMissing` on the Block itself handles "target doesn't exist,
+ * that's OK" separately from runtime failures.
+ */
+export type OnError =
+  | 'abort'
+  | 'skip'
+  | 'ignore'
+  | { retry: number; then: 'abort' | 'skip' };
 
 export interface Block {
   id: string;
   type: BlockType;
   label: string;
-  /** Visual start slot on the track (0-indexed). */
+  /** Fully-qualified node id, e.g. "desktop/click". Phase 2 engine uses this. */
+  nodeId?: string;
+  /** Visual slot on the track (0-indexed). Unique per track. */
   slot: number;
-  /** Visual width in slots (minimum 1). */
-  span: number;
   /** Ids of blocks this one depends on (DAG edges). */
   deps: string[];
-  /** Error handling policy. */
-  onError?: 'abort' | 'skip' | { retry: number; then: 'abort' | 'skip' };
-  /** Action-specific params (free-form). */
+  /** Free-form node parameters. Overrides node decorator defaults. */
   params?: Record<string, unknown>;
-  /** Scenario/track variable references. */
+  /** Variable references this block reads. */
   inputs?: string[];
+  /** Variable references this block writes. */
   outputs?: string[];
+  /** Max runtime in seconds. Undefined = engine default. */
+  timeout?: number;
+  /** If true, a missing target is not an error — silently skip. */
+  skipIfMissing?: boolean;
+  /** Error handling policy. Undefined = abort. */
+  onError?: OnError;
 }
 
 export interface Track {
@@ -63,6 +87,12 @@ export interface Scenario {
   };
   tracks: Track[];
   syncPoints: SyncPoint[];
+  /**
+   * Single special track that runs only when an unhandled `abort` escalates.
+   * Always present; an empty blocks array means "no cleanup, just stop".
+   * See docs/02-error-handling.md.
+   */
+  errorHandler: Track;
   subroutines: Subroutine[];
 }
 
@@ -74,9 +104,12 @@ export const BLOCK_META: Record<
   wait: { color: '#06B6D4', icon: '⏸', label: '待機' },
   loop: { color: '#8B5CF6', icon: '↻', label: 'ループ' },
   branch: { color: '#F59E0B', icon: '⑂', label: '分岐' },
-  sync: { color: '#F43F5E', icon: '⬡', label: '同期' },
   subroutine: { color: '#94A3B8', icon: '⎔', label: 'サブルーチン' },
 };
+
+/** Fixed id used for the scenario's error handler track. */
+export const ERROR_HANDLER_ID = 'error-handler';
+export const ERROR_HANDLER_COLOR = '#f43f5e';
 
 export const TRACK_COLORS = [
   '#3B82F6',

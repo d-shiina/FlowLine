@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { HEADER_W, MIN_SLOTS, RULER_H, SLOT_PX, TRACK_H } from './layout';
+import {
+  ERROR_DIVIDER_H,
+  HEADER_W,
+  MIN_SLOTS,
+  RULER_H,
+  SLOT_PX,
+  TRACK_H,
+} from './layout';
 import { useScenario } from './useScenario';
 import type { Block, Scenario } from './types';
+import { ERROR_HANDLER_ID } from './types';
 import { Toolbar, type EditMode } from './components/Toolbar';
 import { Ruler } from './components/Ruler';
 import { TrackRow } from './components/TrackRow';
@@ -13,6 +21,8 @@ import { Inspector } from './components/Inspector';
 /**
  * Root application. Owns scenario state, playback, selection, and modals.
  * The timeline canvas is block-based: 1 slot = 1 logical step, not 1 second.
+ * The error handler track is rendered below the add-track row; it cannot
+ * receive sync points.
  */
 export default function App() {
   const store = useScenario();
@@ -27,8 +37,11 @@ export default function App() {
     let max = MIN_SLOTS;
     for (const t of scenario.tracks) {
       for (const b of t.blocks) {
-        max = Math.max(max, b.slot + b.span + 2);
+        max = Math.max(max, b.slot + 2);
       }
+    }
+    for (const b of scenario.errorHandler.blocks) {
+      max = Math.max(max, b.slot + 2);
     }
     for (const sp of scenario.syncPoints) max = Math.max(max, sp.slot + 2);
     return max;
@@ -84,11 +97,29 @@ export default function App() {
 
   const selectedBlock: Block | null = useMemo(() => {
     if (!selected) return null;
+    if (selected.trackId === ERROR_HANDLER_ID) {
+      return (
+        scenario.errorHandler.blocks.find((b) => b.id === selected.blockId) ??
+        null
+      );
+    }
     const t = scenario.tracks.find((x) => x.id === selected.trackId);
     return t?.blocks.find((b) => b.id === selected.blockId) ?? null;
   }, [selected, scenario]);
 
+  const isErrorHandlerSelection = selected?.trackId === ERROR_HANDLER_ID;
+
   const handleCanvasClick = (trackId: string, slot: number) => {
+    // The error handler track ignores sync mode — sync points don't apply.
+    if (trackId === ERROR_HANDLER_ID) {
+      setAddModal({
+        trackId,
+        trackName: 'エラー処理',
+        trackColor: '#f43f5e',
+        slot,
+      });
+      return;
+    }
     if (mode === 'sync') {
       setSyncModal({ slot });
     } else {
@@ -142,7 +173,9 @@ export default function App() {
 
   // ─── render ────────────────────────────────────────────────────────
   const canvasWidth = totalSlots * SLOT_PX + HEADER_W;
-  const totalTrackHeight = scenario.tracks.length * TRACK_H;
+  // Sync points and playhead line span regular tracks only — not the
+  // error handler, which runs separately on abort.
+  const regularTrackHeight = scenario.tracks.length * TRACK_H;
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#060c1a] font-mono text-slate-200">
@@ -178,7 +211,7 @@ export default function App() {
           {mode === 'sync' ? '⬡ キャンバスをクリックして同期ポイント配置' : ''}
         </div>
         <div className="ml-auto text-[9px] text-[#1e293b]">
-          ブロック右端ドラッグ=リサイズ / 本体ドラッグ=スロット移動 / ⬡=クリックで削除
+          ブロックドラッグ=スロット移動 / 占有済みなら自動で右シフト / ×=削除
         </div>
       </div>
 
@@ -211,7 +244,9 @@ export default function App() {
                   store.deleteBlock(tid, bid);
                   if (selected?.blockId === bid) setSelected(null);
                 }}
-                onSelectBlock={(tid, bid) => setSelected({ trackId: tid, blockId: bid })}
+                onSelectBlock={(tid, bid) =>
+                  setSelected({ trackId: tid, blockId: bid })
+                }
                 onCanvasClick={handleCanvasClick}
               />
             ))}
@@ -231,14 +266,47 @@ export default function App() {
               <div className="flex-1 bg-[#060c1a]" />
             </button>
 
-            {/* Sync overlay + global playhead */}
+            {/* Error handler separator */}
+            <div
+              className="flex items-center border-t border-b border-[#f43f5e33] bg-[#0a0608] px-3"
+              style={{ height: ERROR_DIVIDER_H }}
+            >
+              <span className="font-mono text-[9px] tracking-wider text-[#f43f5e99]">
+                ⚠ SCENARIO ERROR HANDLER
+              </span>
+              <span className="ml-3 font-mono text-[8px] text-[#f43f5e55]">
+                abort 発火時にのみ実行されるクリーンアップトラック
+              </span>
+            </div>
+
+            {/* Error handler track */}
+            <TrackRow
+              track={scenario.errorHandler}
+              totalSlots={totalSlots}
+              playheadSlot={-1}
+              selectedBlockId={selected?.blockId ?? null}
+              variant="error"
+              onRename={store.renameTrack}
+              onDelete={store.deleteTrack}
+              onUpdateBlock={store.updateBlock}
+              onDeleteBlock={(tid, bid) => {
+                store.deleteBlock(tid, bid);
+                if (selected?.blockId === bid) setSelected(null);
+              }}
+              onSelectBlock={(tid, bid) =>
+                setSelected({ trackId: tid, blockId: bid })
+              }
+              onCanvasClick={handleCanvasClick}
+            />
+
+            {/* Sync overlay + global playhead (regular tracks only) */}
             <div
               className="pointer-events-none absolute"
               style={{
                 top: RULER_H,
                 left: HEADER_W,
                 width: totalSlots * SLOT_PX,
-                height: totalTrackHeight,
+                height: regularTrackHeight,
                 zIndex: 9,
               }}
             >
@@ -246,7 +314,7 @@ export default function App() {
                 <div key={sp.id} className="pointer-events-auto">
                   <SyncLine
                     sp={sp}
-                    totalHeight={totalTrackHeight}
+                    totalHeight={regularTrackHeight}
                     onDelete={store.deleteSync}
                   />
                 </div>
@@ -268,6 +336,7 @@ export default function App() {
         <Inspector
           block={selectedBlock}
           trackId={selected?.trackId ?? null}
+          isErrorHandler={isErrorHandlerSelection}
           onChange={store.updateBlock}
           onClose={() => setSelected(null)}
         />
@@ -277,9 +346,9 @@ export default function App() {
       <div className="flex flex-shrink-0 flex-wrap gap-6 border-t border-[#0f172a] bg-[#0a1020] px-5 py-1.5">
         {(
           [
-            ['─', '#3B82F6', 'ブロック幅 = span (slots)'],
-            ['⬡', '#f43f5e', '同期ポイント = DAG合流'],
-            ['↔', '#475569', '右端ドラッグでリサイズ'],
+            ['▣', '#3B82F6', '1 ブロック = 1 slot'],
+            ['⬡', '#f43f5e', '同期ポイント = DAG 合流'],
+            ['?', '#eab308', 'バッジ = 非デフォルト属性'],
             ['⚡', '#22C55E', 'トラックは並列実行'],
           ] as const
         ).map(([icon, color, text]) => (
