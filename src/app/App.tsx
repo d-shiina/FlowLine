@@ -8,7 +8,7 @@ import {
   TRACK_H,
 } from './layout';
 import { useScenario, uid } from './useScenario';
-import type { Block, Scenario } from './types';
+import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Toolbar, type EditMode } from './components/Toolbar';
 import { Ruler } from './components/Ruler';
@@ -27,9 +27,44 @@ import { Inspector } from './components/Inspector';
  * The error handler track is rendered below the add-track row; it cannot
  * receive sync points.
  */
+type EditorMode =
+  | { type: 'scenario' }
+  | { type: 'subroutine'; id: string };
+
 export default function App() {
   const store = useScenario();
   const { scenario } = store;
+
+  // ─── editor mode (scenario vs subroutine) ──────────────────────────
+  const [editorMode, setEditorMode] = useState<EditorMode>({
+    type: 'scenario',
+  });
+  const activeSubroutine =
+    editorMode.type === 'subroutine'
+      ? scenario.subroutines.find((s) => s.id === editorMode.id) ?? null
+      : null;
+
+  // If the open subroutine disappears (deleted or undone), fall back to
+  // the scenario view automatically.
+  useEffect(() => {
+    if (
+      editorMode.type === 'subroutine' &&
+      !scenario.subroutines.some((s) => s.id === editorMode.id)
+    ) {
+      setEditorMode({ type: 'scenario' });
+    }
+  }, [editorMode, scenario.subroutines]);
+
+  // Synthesize a Track wrapper so the TrackRow / BlockView / GraphEdges
+  // components can treat the subroutine's flat block list as a track.
+  const subroutineTrack: Track | null = activeSubroutine
+    ? {
+        id: activeSubroutine.id,
+        name: activeSubroutine.name,
+        color: '#94a3b8',
+        blocks: activeSubroutine.blocks,
+      }
+    : null;
 
   // ─── playback ──────────────────────────────────────────────────────
   const [playing, setPlaying] = useState(false);
@@ -38,6 +73,12 @@ export default function App() {
 
   const totalSlots = useMemo(() => {
     let max = MIN_SLOTS;
+    if (editorMode.type === 'subroutine' && activeSubroutine) {
+      for (const b of activeSubroutine.blocks) {
+        max = Math.max(max, b.slot + 2);
+      }
+      return max;
+    }
     for (const t of scenario.tracks) {
       for (const b of t.blocks) {
         max = Math.max(max, b.slot + 2);
@@ -48,7 +89,7 @@ export default function App() {
     }
     for (const sp of scenario.syncPoints) max = Math.max(max, sp.slot + 2);
     return max;
-  }, [scenario]);
+  }, [scenario, editorMode, activeSubroutine]);
 
   const togglePlay = () => {
     if (playing) {
@@ -115,7 +156,10 @@ export default function App() {
       );
     }
     const t = scenario.tracks.find((x) => x.id === selected.trackId);
-    return t?.blocks.find((b) => b.id === selected.blockId) ?? null;
+    if (t) return t.blocks.find((b) => b.id === selected.blockId) ?? null;
+    const sub = scenario.subroutines.find((s) => s.id === selected.trackId);
+    if (sub) return sub.blocks.find((b) => b.id === selected.blockId) ?? null;
+    return null;
   }, [selected, scenario]);
 
   const isErrorHandlerSelection = selected?.trackId === ERROR_HANDLER_ID;
@@ -155,6 +199,16 @@ export default function App() {
         trackId,
         trackName: 'エラー処理',
         trackColor: '#f43f5e',
+        slot,
+      });
+      return;
+    }
+    // Subroutine editor ignores sync mode too — sync points are scenario-level.
+    if (editorMode.type === 'subroutine' && subroutineTrack) {
+      setAddModal({
+        trackId,
+        trackName: subroutineTrack.name,
+        trackColor: subroutineTrack.color,
         slot,
       });
       return;
@@ -254,12 +308,16 @@ export default function App() {
     const src = clipboardRef.current;
     if (!src) return;
     // Destination: same container as selection, one slot after selected
-    // block. If nothing selected, drop on the first track at slot 0.
+    // block. If nothing selected, drop on the active container — the
+    // open subroutine in subroutine mode, or the first track otherwise.
     let targetId: string | undefined;
     let targetSlot = 0;
     if (selected && selectedBlock) {
       targetId = selected.trackId;
       targetSlot = selectedBlock.slot + 1;
+    } else if (editorMode.type === 'subroutine') {
+      targetId = editorMode.id;
+      targetSlot = 0;
     } else if (scenario.tracks.length > 0) {
       targetId = scenario.tracks[0].id;
       targetSlot = 0;
@@ -269,13 +327,13 @@ export default function App() {
       ...src,
       id: uid('b'),
       slot: targetSlot,
-      // Drop deps — pasted blocks may land in a different track where the
-      // original deps don't make sense; user can re-link explicitly.
+      // Drop deps — pasted blocks may land in a different container where
+      // the original deps don't make sense; user can re-link explicitly.
       deps: [],
     };
     store.addBlock(targetId, newBlock);
     setSelected({ trackId: targetId, blockId: newBlock.id });
-  }, [selected, selectedBlock, scenario.tracks, store]);
+  }, [selected, selectedBlock, scenario.tracks, editorMode, store]);
 
   // ─── keyboard shortcuts ───────────────────────────────────────────
   // Delete/Backspace  → delete selected block
@@ -416,13 +474,65 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         <SubroutineSidebar
           subroutines={scenario.subroutines}
+          activeSubroutineId={
+            editorMode.type === 'subroutine' ? editorMode.id : null
+          }
           onAdd={(name) => {
             store.addSubroutine(name);
           }}
           onRename={store.renameSubroutine}
-          onDelete={store.deleteSubroutine}
+          onDelete={(id) => {
+            // If we're currently editing this subroutine, close the editor
+            // before deleting so selection/linkSource don't dangle.
+            if (
+              editorMode.type === 'subroutine' &&
+              editorMode.id === id
+            ) {
+              setEditorMode({ type: 'scenario' });
+              setSelected(null);
+              setLinkSource(null);
+            }
+            store.deleteSubroutine(id);
+          }}
+          onOpen={(id) => {
+            setEditorMode({ type: 'subroutine', id });
+            setSelected(null);
+            setLinkSource(null);
+          }}
         />
         <div className="fl-scroll min-h-0 flex-1 overflow-auto">
+          {editorMode.type === 'subroutine' && subroutineTrack && (
+            <div className="flex items-center gap-2 border-b border-[#0f172a] bg-[#0a1320] px-4 py-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditorMode({ type: 'scenario' });
+                  setSelected(null);
+                  setLinkSource(null);
+                }}
+                className="font-mono text-[10px] text-slate-500 transition-colors hover:text-slate-300"
+              >
+                シナリオ
+              </button>
+              <span className="font-mono text-[10px] text-slate-700">/</span>
+              <div className="font-mono text-[11px] font-bold text-[#60a5fa]">
+                ⎔ {subroutineTrack.name}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditorMode({ type: 'scenario' });
+                  setSelected(null);
+                  setLinkSource(null);
+                }}
+                className="ml-auto flex items-center gap-1 rounded-md border border-[#334155] bg-[#0f172a] px-2 py-0.5 font-mono text-[9px] text-slate-400 transition-colors hover:border-[#475569] hover:text-slate-200"
+                title="シナリオビューに戻る"
+              >
+                × 閉じる
+              </button>
+            </div>
+          )}
+
           <div className="relative" style={{ minWidth: canvasWidth }}>
             {/* Ruler row */}
             <div className="flex">
@@ -435,118 +545,174 @@ export default function App() {
               </div>
             </div>
 
-            {/* Tracks */}
-            {scenario.tracks.map((track) => (
-              <TrackRow
-                key={track.id}
-                track={track}
-                totalSlots={totalSlots}
-                playheadSlot={playhead}
-                selectedBlockId={selected?.blockId ?? null}
-                linkSourceBlockId={linkSource?.blockId ?? null}
-                blocksDraggable={mode === 'block'}
-                subroutines={scenario.subroutines}
-                onRename={store.renameTrack}
-                onDelete={store.deleteTrack}
-                onUpdateBlock={store.updateBlock}
-                onDeleteBlock={(tid, bid) => {
-                  store.deleteBlock(tid, bid);
-                  if (selected?.blockId === bid) setSelected(null);
-                }}
-                onSelectBlock={handleBlockClick}
-                onCanvasClick={handleCanvasClick}
-              />
-            ))}
-
-            {/* Add track row */}
-            <button
-              type="button"
-              onClick={store.addTrack}
-              className="flex h-9 w-full cursor-pointer border-b border-dashed border-[#0f172a] text-left"
-            >
-              <div
-                className="flex flex-shrink-0 items-center bg-[#0a1020] px-3"
-                style={{ width: HEADER_W, borderRight: '3px solid #0f172a' }}
-              >
-                <span className="text-[9px] text-[#1e293b]">+ トラック追加</span>
-              </div>
-              <div className="flex-1 bg-[#060c1a]" />
-            </button>
-
-            {/* Error handler separator */}
-            <div
-              className="flex items-center border-t border-b border-[#f43f5e33] bg-[#0a0608] px-3"
-              style={{ height: ERROR_DIVIDER_H }}
-            >
-              <span className="font-mono text-[9px] tracking-wider text-[#f43f5e99]">
-                ⚠ SCENARIO ERROR HANDLER
-              </span>
-              <span className="ml-3 font-mono text-[8px] text-[#f43f5e55]">
-                abort 発火時にのみ実行されるクリーンアップトラック
-              </span>
-            </div>
-
-            {/* Error handler track */}
-            <TrackRow
-              track={scenario.errorHandler}
-              totalSlots={totalSlots}
-              playheadSlot={-1}
-              selectedBlockId={selected?.blockId ?? null}
-              linkSourceBlockId={linkSource?.blockId ?? null}
-              blocksDraggable={mode === 'block'}
-              variant="error"
-              subroutines={scenario.subroutines}
-              onRename={store.renameTrack}
-              onDelete={store.deleteTrack}
-              onUpdateBlock={store.updateBlock}
-              onDeleteBlock={(tid, bid) => {
-                store.deleteBlock(tid, bid);
-                if (selected?.blockId === bid) setSelected(null);
-              }}
-              onSelectBlock={handleBlockClick}
-              onCanvasClick={handleCanvasClick}
-            />
-
-            {/* DAG edges + sync overlay + global playhead (regular tracks only) */}
-            <div
-              className="pointer-events-none absolute"
-              style={{
-                top: RULER_H,
-                left: HEADER_W,
-                width: totalSlots * SLOT_PX,
-                height: regularTrackHeight,
-                zIndex: 9,
-              }}
-            >
-              <GraphEdges
-                tracks={scenario.tracks}
-                totalSlots={totalSlots}
-                selectedBlockId={
-                  selected && selected.trackId !== ERROR_HANDLER_ID
-                    ? selected.blockId
-                    : null
-                }
-              />
-              {scenario.syncPoints.map((sp) => (
-                <div key={sp.id} className="pointer-events-auto">
-                  <SyncLine
-                    sp={sp}
-                    totalHeight={regularTrackHeight}
-                    onDelete={store.deleteSync}
+            {editorMode.type === 'scenario' ? (
+              <>
+                {/* Tracks */}
+                {scenario.tracks.map((track) => (
+                  <TrackRow
+                    key={track.id}
+                    track={track}
+                    totalSlots={totalSlots}
+                    playheadSlot={playhead}
+                    selectedBlockId={selected?.blockId ?? null}
+                    linkSourceBlockId={linkSource?.blockId ?? null}
+                    blocksDraggable={mode === 'block'}
+                    subroutines={scenario.subroutines}
+                    onRename={store.renameTrack}
+                    onDelete={store.deleteTrack}
+                    onUpdateBlock={store.updateBlock}
+                    onDeleteBlock={(tid, bid) => {
+                      store.deleteBlock(tid, bid);
+                      if (selected?.blockId === bid) setSelected(null);
+                    }}
+                    onSelectBlock={handleBlockClick}
+                    onCanvasClick={handleCanvasClick}
                   />
-                </div>
-              ))}
-              {playhead >= 0 && (
+                ))}
+
+                {/* Add track row */}
+                <button
+                  type="button"
+                  onClick={store.addTrack}
+                  className="flex h-9 w-full cursor-pointer border-b border-dashed border-[#0f172a] text-left"
+                >
+                  <div
+                    className="flex flex-shrink-0 items-center bg-[#0a1020] px-3"
+                    style={{
+                      width: HEADER_W,
+                      borderRight: '3px solid #0f172a',
+                    }}
+                  >
+                    <span className="text-[9px] text-[#1e293b]">
+                      + トラック追加
+                    </span>
+                  </div>
+                  <div className="flex-1 bg-[#060c1a]" />
+                </button>
+
+                {/* Error handler separator */}
                 <div
-                  className="pointer-events-none absolute top-0 h-full w-px"
-                  style={{
-                    left: playhead * SLOT_PX,
-                    background: '#22C55E88',
-                    boxShadow: '0 0 6px #22C55E',
+                  className="flex items-center border-t border-b border-[#f43f5e33] bg-[#0a0608] px-3"
+                  style={{ height: ERROR_DIVIDER_H }}
+                >
+                  <span className="font-mono text-[9px] tracking-wider text-[#f43f5e99]">
+                    ⚠ SCENARIO ERROR HANDLER
+                  </span>
+                  <span className="ml-3 font-mono text-[8px] text-[#f43f5e55]">
+                    abort 発火時にのみ実行されるクリーンアップトラック
+                  </span>
+                </div>
+
+                {/* Error handler track */}
+                <TrackRow
+                  track={scenario.errorHandler}
+                  totalSlots={totalSlots}
+                  playheadSlot={-1}
+                  selectedBlockId={selected?.blockId ?? null}
+                  linkSourceBlockId={linkSource?.blockId ?? null}
+                  blocksDraggable={mode === 'block'}
+                  variant="error"
+                  subroutines={scenario.subroutines}
+                  onRename={store.renameTrack}
+                  onDelete={store.deleteTrack}
+                  onUpdateBlock={store.updateBlock}
+                  onDeleteBlock={(tid, bid) => {
+                    store.deleteBlock(tid, bid);
+                    if (selected?.blockId === bid) setSelected(null);
                   }}
+                  onSelectBlock={handleBlockClick}
+                  onCanvasClick={handleCanvasClick}
                 />
-              )}
-            </div>
+
+                {/* DAG edges + sync overlay + global playhead */}
+                <div
+                  className="pointer-events-none absolute"
+                  style={{
+                    top: RULER_H,
+                    left: HEADER_W,
+                    width: totalSlots * SLOT_PX,
+                    height: regularTrackHeight,
+                    zIndex: 9,
+                  }}
+                >
+                  <GraphEdges
+                    tracks={scenario.tracks}
+                    totalSlots={totalSlots}
+                    selectedBlockId={
+                      selected && selected.trackId !== ERROR_HANDLER_ID
+                        ? selected.blockId
+                        : null
+                    }
+                  />
+                  {scenario.syncPoints.map((sp) => (
+                    <div key={sp.id} className="pointer-events-auto">
+                      <SyncLine
+                        sp={sp}
+                        totalHeight={regularTrackHeight}
+                        onDelete={store.deleteSync}
+                      />
+                    </div>
+                  ))}
+                  {playhead >= 0 && (
+                    <div
+                      className="pointer-events-none absolute top-0 h-full w-px"
+                      style={{
+                        left: playhead * SLOT_PX,
+                        background: '#22C55E88',
+                        boxShadow: '0 0 6px #22C55E',
+                      }}
+                    />
+                  )}
+                </div>
+              </>
+            ) : (
+              subroutineTrack && (
+                <>
+                  <TrackRow
+                    track={subroutineTrack}
+                    totalSlots={totalSlots}
+                    playheadSlot={-1}
+                    selectedBlockId={selected?.blockId ?? null}
+                    linkSourceBlockId={linkSource?.blockId ?? null}
+                    blocksDraggable={mode === 'block'}
+                    subroutines={scenario.subroutines}
+                    onRename={(id, name) => store.renameSubroutine(id, name)}
+                    onDelete={() => {
+                      /* subroutine sidebar handles delete */
+                    }}
+                    onUpdateBlock={store.updateBlock}
+                    onDeleteBlock={(tid, bid) => {
+                      store.deleteBlock(tid, bid);
+                      if (selected?.blockId === bid) setSelected(null);
+                    }}
+                    onSelectBlock={handleBlockClick}
+                    onCanvasClick={handleCanvasClick}
+                  />
+
+                  {/* DAG edges for the subroutine's single track */}
+                  <div
+                    className="pointer-events-none absolute"
+                    style={{
+                      top: RULER_H,
+                      left: HEADER_W,
+                      width: totalSlots * SLOT_PX,
+                      height: TRACK_H,
+                      zIndex: 9,
+                    }}
+                  >
+                    <GraphEdges
+                      tracks={[subroutineTrack]}
+                      totalSlots={totalSlots}
+                      selectedBlockId={
+                        selected && selected.trackId === subroutineTrack.id
+                          ? selected.blockId
+                          : null
+                      }
+                    />
+                  </div>
+                </>
+              )
+            )}
           </div>
         </div>
 

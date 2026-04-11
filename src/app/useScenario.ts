@@ -51,21 +51,47 @@ function cascadeDeleteDep(s: Scenario, blockId: string): Scenario {
 }
 
 /**
- * Apply a mutation to either a regular track or the error handler track.
- * The error handler is identified by its fixed `ERROR_HANDLER_ID`.
+ * Apply a block-level mutation to whichever container holds the blocks:
+ * a regular track, the error handler, OR a subroutine. This lets block
+ * operations (add/update/delete/addDep/removeDep) work uniformly across
+ * all edit surfaces including the subroutine internal editor.
+ *
+ * Returns the same scenario reference if `fn` returned the same blocks
+ * array (no-op short-circuit feeds commit()'s no-op detection).
  */
-function mapTrack(
+function mapContainerBlocks(
   s: Scenario,
-  trackId: string,
-  fn: (t: Track) => Track,
+  containerId: string,
+  fn: (blocks: Block[]) => Block[],
 ): Scenario {
-  if (trackId === ERROR_HANDLER_ID) {
-    return { ...s, errorHandler: fn(s.errorHandler) };
+  if (containerId === ERROR_HANDLER_ID) {
+    const blocks = fn(s.errorHandler.blocks);
+    if (blocks === s.errorHandler.blocks) return s;
+    return { ...s, errorHandler: { ...s.errorHandler, blocks } };
   }
-  return {
-    ...s,
-    tracks: s.tracks.map((t) => (t.id === trackId ? fn(t) : t)),
-  };
+  const track = s.tracks.find((t) => t.id === containerId);
+  if (track) {
+    const blocks = fn(track.blocks);
+    if (blocks === track.blocks) return s;
+    return {
+      ...s,
+      tracks: s.tracks.map((t) =>
+        t.id === containerId ? { ...t, blocks } : t,
+      ),
+    };
+  }
+  const sub = s.subroutines.find((x) => x.id === containerId);
+  if (sub) {
+    const blocks = fn(sub.blocks);
+    if (blocks === sub.blocks) return s;
+    return {
+      ...s,
+      subroutines: s.subroutines.map((x) =>
+        x.id === containerId ? { ...x, blocks } : x,
+      ),
+    };
+  }
+  return s;
 }
 
 const HISTORY_LIMIT = 50;
@@ -219,11 +245,11 @@ export function useScenario(): ScenarioStore {
   );
 
   const addBlock = useCallback(
-    (trackId: string, block: Block) => {
+    (containerId: string, block: Block) => {
       commit((s) =>
-        mapTrack(s, trackId, (t) => {
-          const withRoom = makeRoomAt(t.blocks, block.slot);
-          return { ...t, blocks: [...withRoom, block] };
+        mapContainerBlocks(s, containerId, (blocks) => {
+          const withRoom = makeRoomAt(blocks, block.slot);
+          return [...withRoom, block];
         }),
       );
     },
@@ -231,22 +257,19 @@ export function useScenario(): ScenarioStore {
   );
 
   const updateBlock = useCallback(
-    (trackId: string, blockId: string, patch: Partial<Block>) => {
+    (containerId: string, blockId: string, patch: Partial<Block>) => {
       commit((s) =>
-        mapTrack(s, trackId, (t) => {
-          const current = t.blocks.find((b) => b.id === blockId);
-          if (!current) return t;
+        mapContainerBlocks(s, containerId, (blocks) => {
+          const current = blocks.find((b) => b.id === blockId);
+          if (!current) return blocks;
           const slotChanged =
             patch.slot !== undefined && patch.slot !== current.slot;
           const base = slotChanged
-            ? makeRoomAt(t.blocks, patch.slot as number, blockId)
-            : t.blocks;
-          return {
-            ...t,
-            blocks: base.map((b) =>
-              b.id === blockId ? { ...b, ...patch } : b,
-            ),
-          };
+            ? makeRoomAt(blocks, patch.slot as number, blockId)
+            : blocks;
+          return base.map((b) =>
+            b.id === blockId ? { ...b, ...patch } : b,
+          );
         }),
       );
     },
@@ -254,12 +277,11 @@ export function useScenario(): ScenarioStore {
   );
 
   const deleteBlock = useCallback(
-    (trackId: string, blockId: string) => {
+    (containerId: string, blockId: string) => {
       commit((s) => {
-        const removed = mapTrack(s, trackId, (t) => ({
-          ...t,
-          blocks: t.blocks.filter((b) => b.id !== blockId),
-        }));
+        const removed = mapContainerBlocks(s, containerId, (blocks) =>
+          blocks.filter((b) => b.id !== blockId),
+        );
         return cascadeDeleteDep(removed, blockId);
       });
     },
@@ -267,33 +289,31 @@ export function useScenario(): ScenarioStore {
   );
 
   const addDep = useCallback(
-    (trackId: string, blockId: string, depId: string) => {
+    (containerId: string, blockId: string, depId: string) => {
       if (blockId === depId) return; // no self-deps
       commit((s) =>
-        mapTrack(s, trackId, (t) => ({
-          ...t,
-          blocks: t.blocks.map((b) => {
+        mapContainerBlocks(s, containerId, (blocks) =>
+          blocks.map((b) => {
             if (b.id !== blockId) return b;
             if (b.deps.includes(depId)) return b;
             return { ...b, deps: [...b.deps, depId] };
           }),
-        })),
+        ),
       );
     },
     [commit],
   );
 
   const removeDep = useCallback(
-    (trackId: string, blockId: string, depId: string) => {
+    (containerId: string, blockId: string, depId: string) => {
       commit((s) =>
-        mapTrack(s, trackId, (t) => ({
-          ...t,
-          blocks: t.blocks.map((b) =>
+        mapContainerBlocks(s, containerId, (blocks) =>
+          blocks.map((b) =>
             b.id === blockId
               ? { ...b, deps: b.deps.filter((d) => d !== depId) }
               : b,
           ),
-        })),
+        ),
       );
     },
     [commit],

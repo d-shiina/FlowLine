@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { Box as BoxIcon, Plus, Trash2 } from 'lucide-react';
+import { Box as BoxIcon, Plus, Trash2, PencilLine } from 'lucide-react';
 import type { Subroutine } from '../types';
 
 interface Props {
   subroutines: Subroutine[];
+  activeSubroutineId: string | null;
   onAdd: (name: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  onOpen: (id: string) => void;
 }
 
 /**
@@ -20,9 +22,11 @@ interface Props {
  */
 export function SubroutineSidebar({
   subroutines,
+  activeSubroutineId,
   onAdd,
   onRename,
   onDelete,
+  onOpen,
 }: Props) {
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState('');
@@ -69,49 +73,69 @@ export function SubroutineSidebar({
       )}
 
       <div className="flex flex-col gap-1">
-        {subroutines.map((sub) => (
-          <div
-            key={sub.id}
-            className="group flex items-center gap-1 rounded-md border border-[#1e293b] bg-[#0f172a] px-2 py-1.5 transition-colors hover:border-[#334155]"
-          >
-            {editingId === sub.id ? (
-              <input
-                autoFocus
-                value={editVal}
-                onChange={(e) => setEditVal(e.target.value)}
-                onBlur={() => commitRename(sub.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitRename(sub.id);
-                  if (e.key === 'Escape') setEditingId(null);
-                }}
-                className="flex-1 bg-transparent font-mono text-[10px] text-slate-200 outline-none"
-              />
-            ) : (
+        {subroutines.map((sub) => {
+          const active = activeSubroutineId === sub.id;
+          return (
+            <div
+              key={sub.id}
+              className="group flex items-center gap-1 rounded-md border px-2 py-1.5 transition-colors"
+              style={{
+                borderColor: active ? '#60a5fa' : '#1e293b',
+                background: active ? '#60a5fa10' : '#0f172a',
+              }}
+            >
+              {editingId === sub.id ? (
+                <input
+                  autoFocus
+                  value={editVal}
+                  onChange={(e) => setEditVal(e.target.value)}
+                  onBlur={() => commitRename(sub.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename(sub.id);
+                    if (e.key === 'Escape') setEditingId(null);
+                  }}
+                  className="flex-1 bg-transparent font-mono text-[10px] text-slate-200 outline-none"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpen(sub.id)}
+                  onDoubleClick={() => {
+                    setEditingId(sub.id);
+                    setEditVal(sub.name);
+                  }}
+                  className="flex-1 truncate text-left font-mono text-[10px] hover:text-slate-100"
+                  style={{ color: active ? '#60a5fa' : '#cbd5e1' }}
+                  title="クリックで開く / ダブルクリックで名前変更"
+                >
+                  {sub.name}
+                </button>
+              )}
+              <span className="font-mono text-[8px] text-slate-600">
+                {sub.blocks.length}
+              </span>
               <button
                 type="button"
                 onClick={() => {
                   setEditingId(sub.id);
                   setEditVal(sub.name);
                 }}
-                className="flex-1 truncate text-left font-mono text-[10px] text-slate-300 hover:text-slate-100"
-                title="クリックで名前変更"
+                className="opacity-0 transition-opacity group-hover:opacity-100"
+                title="名前変更"
               >
-                {sub.name}
+                <PencilLine className="h-2.5 w-2.5 text-slate-600 hover:text-slate-300" />
               </button>
-            )}
-            <span className="font-mono text-[8px] text-slate-600">
-              {sub.blocks.length}
-            </span>
-            <button
-              type="button"
-              onClick={() => onDelete(sub.id)}
-              className="opacity-0 transition-opacity group-hover:opacity-100"
-              title="削除"
-            >
-              <Trash2 className="h-2.5 w-2.5 text-slate-600 hover:text-red-500" />
-            </button>
-          </div>
-        ))}
+              <button
+                type="button"
+                onClick={() => onDelete(sub.id)}
+                className="opacity-0 transition-opacity group-hover:opacity-100"
+                title="削除"
+              >
+                <Trash2 className="h-2.5 w-2.5 text-slate-600 hover:text-red-500" />
+              </button>
+            </div>
+          );
+        })}
 
         {creating && (
           <div className="flex items-center gap-1 rounded-md border border-[#3B82F6] bg-[#0f172a] px-2 py-1.5">
@@ -135,9 +159,9 @@ export function SubroutineSidebar({
       </div>
 
       <div className="mt-auto font-mono text-[8px] leading-relaxed text-slate-700">
-        サブルーチンはタイムライン上で
+        クリックで内部エディタを開き、
         <br />
-        サブルーチン ブロックとして呼び出せます
+        サブルーチンのブロックを編集できます
       </div>
     </aside>
   );
