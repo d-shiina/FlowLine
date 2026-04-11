@@ -7,19 +7,36 @@ let _uid = 1000;
 export const uid = (prefix = 'id') => `${prefix}-${++_uid}`;
 
 /**
- * Recursively shift occupants at `slot` to `slot + 1` so the slot becomes
- * free. Handles chain collisions (a block at N+1 gets pushed to N+2, etc.).
- * When moving a block, pass its id as `excludeId` to avoid "colliding with
- * itself" at its current slot.
+ * Compose a lane key from a block's container + case labels. Blocks
+ * in the same key share a slot axis, so dragging one into another's
+ * column should push it rightward. Blocks in different lanes (e.g.
+ * a branch's TRUE and FALSE children) can happily share columns.
+ */
+function laneKey(b: Block): string {
+  return `${b.parentBlockId ?? ''}:${b.parentBranch ?? ''}`;
+}
+
+/**
+ * Recursively shift occupants at `slot` to `slot + 1` so the slot
+ * becomes free. Handles chain collisions (a block at N+1 gets pushed
+ * to N+2, etc.). When moving a block, pass its id as `excludeId` to
+ * avoid "colliding with itself" at its current slot.
+ *
+ * Lane-aware: only blocks that share the target block's lane key are
+ * pushed. A branch's TRUE child at slot 4 is NOT displaced when the
+ * FALSE child moves to slot 4 — the two lanes are independent axes.
  */
 function makeRoomAt(
   blocks: Block[],
   slot: number,
-  excludeId?: string,
+  excludeId: string | undefined,
+  lane: string,
 ): Block[] {
-  const occupant = blocks.find((b) => b.slot === slot && b.id !== excludeId);
+  const occupant = blocks.find(
+    (b) => b.slot === slot && b.id !== excludeId && laneKey(b) === lane,
+  );
   if (!occupant) return blocks;
-  const withRoom = makeRoomAt(blocks, slot + 1, excludeId);
+  const withRoom = makeRoomAt(blocks, slot + 1, excludeId, lane);
   return withRoom.map((b) =>
     b.id === occupant.id ? { ...b, slot: slot + 1 } : b,
   );
@@ -300,7 +317,12 @@ export function useScenario(): ScenarioStore {
     (containerId: string, block: Block) => {
       commit((s) =>
         mapContainerBlocks(s, containerId, (blocks) => {
-          const withRoom = makeRoomAt(blocks, block.slot);
+          const withRoom = makeRoomAt(
+            blocks,
+            block.slot,
+            undefined,
+            laneKey(block),
+          );
           return [...withRoom, block];
         }),
       );
@@ -314,14 +336,20 @@ export function useScenario(): ScenarioStore {
         mapContainerBlocks(s, containerId, (blocks) => {
           const current = blocks.find((b) => b.id === blockId);
           if (!current) return blocks;
-          const slotChanged =
-            patch.slot !== undefined && patch.slot !== current.slot;
-          const base = slotChanged
-            ? makeRoomAt(blocks, patch.slot as number, blockId)
+          const merged = { ...current, ...patch };
+          // Trigger collision handling when the target slot, parent,
+          // or lane changes — any of those can land the block on a
+          // new cell that already has an occupant.
+          const needsRoom =
+            (patch.slot !== undefined && patch.slot !== current.slot) ||
+            (patch.parentBlockId !== undefined &&
+              patch.parentBlockId !== current.parentBlockId) ||
+            (patch.parentBranch !== undefined &&
+              patch.parentBranch !== current.parentBranch);
+          const base = needsRoom
+            ? makeRoomAt(blocks, merged.slot, blockId, laneKey(merged))
             : blocks;
-          return base.map((b) =>
-            b.id === blockId ? { ...b, ...patch } : b,
-          );
+          return base.map((b) => (b.id === blockId ? merged : b));
         }),
       );
     },

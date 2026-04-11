@@ -6,7 +6,8 @@ import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, pxToSlot } from '../layout';
 
 /** Rect of a container frame rendered on the same track. */
 export interface ContainerFrameRect {
-  id: string;
+  /** Reference to the underlying container block. */
+  block: Block;
   parentType: 'loop' | 'branch' | 'switch';
   label: string;
   color: string;
@@ -15,6 +16,8 @@ export interface ContainerFrameRect {
   empty: boolean;
   /** Lane labels, top-to-bottom. One entry = full-height body. */
   cases: string[];
+  /** Short header summary like `× 3` / `while` / `3 cases`. */
+  summary: string;
 }
 
 /**
@@ -165,17 +168,20 @@ export function BlockView({
   const width = BLOCK_W;
 
   // Vertical placement depends on whether this block lives in a
-  // multi-case container. Top-level and loop-body blocks fill the
-  // entire row; branch / switch children share the row across N
-  // lanes, positioned by laneIndex.
-  const frameInset = 3;
-  const usableH = trackHeight - frameInset * 2;
+  // container frame. Frames carry a 16 px header strip at the top
+  // (the Blender-style label bar), so children are offset below
+  // it. Multi-lane containers split the remaining body height
+  // among their cases; loop bodies get the whole body as one lane.
+  const FRAME_INSET = 3;
+  const FRAME_HEADER = 16;
   let blockTop = 8;
   let blockH = trackHeight - 16;
-  if (lane && lane.laneCount > 1) {
-    const laneH = usableH / lane.laneCount;
-    blockTop = frameInset + lane.laneIndex * laneH + 3;
-    blockH = laneH - 6;
+  if (lane) {
+    const bodyTop = FRAME_INSET + FRAME_HEADER;
+    const bodyH = trackHeight - bodyTop - FRAME_INSET;
+    const laneH = bodyH / Math.max(1, lane.laneCount);
+    blockTop = bodyTop + lane.laneIndex * laneH + 2;
+    blockH = laneH - 4;
   }
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -232,38 +238,40 @@ export function BlockView({
       // block's own frame so a loop can't be dropped into itself).
       const hits = containerFrames.filter(
         (f) =>
-          f.id !== block.id &&
+          f.block.id !== block.id &&
           targetSlot >= f.fromSlot &&
           targetSlot <= f.toSlot,
       );
       landingFrame = hits.length > 0 ? hits[hits.length - 1] : null;
       landingCase = undefined;
 
-      // Compute the ghost's Y based on the landing lane. When the
-      // frame has multiple cases, pick the lane whose Y band
-      // contains the cursor so the ghost previews the right slot.
+      // Compute the ghost's Y based on the landing lane. Every
+      // container frame carries a 16 px header strip at the top,
+      // so the usable body starts below it. Multi-lane containers
+      // split the body among their cases; single-lane loops fill
+      // the whole body.
       let ghostTop = rect.top + 8;
       let ghostH = blockH;
-      if (landingFrame && landingFrame.cases.length > 1) {
+      if (landingFrame) {
         const frameTop = rect.top + 3;
-        const frameH = trackHeight - 6;
-        const laneH = frameH / landingFrame.cases.length;
-        const yInFrame = ev.clientY - frameTop;
-        const idx = Math.max(
-          0,
-          Math.min(
-            landingFrame.cases.length - 1,
-            Math.floor(yInFrame / laneH),
-          ),
-        );
-        landingCase = landingFrame.cases[idx];
-        ghostTop = frameTop + idx * laneH + 3;
-        ghostH = laneH - 6;
-      } else if (landingFrame) {
-        // Single-lane container (loop or empty branch/switch
-        // — pick the first case so the drop is always valid).
-        landingCase =
-          landingFrame.cases.length > 0 ? landingFrame.cases[0] : undefined;
+        const bodyTop = frameTop + 16;
+        const bodyH = trackHeight - 6 - 16;
+        const lanes = Math.max(1, landingFrame.cases.length);
+        const laneH = bodyH / lanes;
+        if (lanes > 1) {
+          const yInBody = ev.clientY - bodyTop;
+          const idx = Math.max(
+            0,
+            Math.min(lanes - 1, Math.floor(yInBody / laneH)),
+          );
+          landingCase = landingFrame.cases[idx];
+          ghostTop = bodyTop + idx * laneH + 2;
+          ghostH = laneH - 4;
+        } else {
+          landingCase = landingFrame.cases[0] ?? undefined;
+          ghostTop = bodyTop + 2;
+          ghostH = bodyH - 4;
+        }
       }
 
       setGhost({
@@ -310,7 +318,7 @@ export function BlockView({
       const patch: Partial<Block> = {};
       if (targetSlot !== block.slot) patch.slot = targetSlot;
 
-      const nextParentId = landingFrame?.id;
+      const nextParentId = landingFrame?.block.id;
       if (nextParentId !== block.parentBlockId) {
         patch.parentBlockId = nextParentId;
       }

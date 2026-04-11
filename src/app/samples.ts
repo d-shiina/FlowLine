@@ -147,7 +147,9 @@ const controlFlow: Scenario = {
           slot: 0,
           deps: [],
         },
-        // Fixed-count loop: runs body 3 times.
+        // Fixed-count loop: runs body 3 times. Container and body
+        // share column 1 — the header bar sits at the top of that
+        // column and the body block occupies the space below.
         {
           id: 'b-loop1',
           type: 'loop',
@@ -160,16 +162,18 @@ const controlFlow: Scenario = {
           id: 'b-loop1-work',
           type: 'action',
           label: 'ワーク',
-          slot: 2,
+          slot: 1,
           deps: [],
           parentBlockId: 'b-loop1',
         },
-        // Branch on whether the retry counter is still below the cap.
+        // Branch: TRUE and FALSE children share column 2 so the
+        // fork visually lines up. The lane axes are independent,
+        // so same-column stacking is exactly what the user wants.
         {
           id: 'b-branch',
           type: 'branch',
           label: 'retries < max?',
-          slot: 4,
+          slot: 2,
           deps: ['b-loop1'],
           params: {
             condition: {
@@ -184,7 +188,7 @@ const controlFlow: Scenario = {
           id: 'b-then',
           type: 'action',
           label: 'リトライ処理',
-          slot: 5,
+          slot: 2,
           deps: [],
           parentBlockId: 'b-branch',
           parentBranch: 'then',
@@ -193,19 +197,18 @@ const controlFlow: Scenario = {
           id: 'b-else',
           type: 'action',
           label: '諦めて通知',
-          slot: 6,
+          slot: 2,
           deps: [],
           parentBlockId: 'b-branch',
           parentBranch: 'else',
         },
         // While loop: runs body while ``track.track-1.loop_index``
         // is still less than 2, so it executes twice then stops.
-        // The loop index auto-increments each iteration.
         {
           id: 'b-loop2',
           type: 'loop',
           label: 'ポーリング',
-          slot: 7,
+          slot: 3,
           deps: ['b-branch'],
           params: {
             whileCondition: {
@@ -217,7 +220,7 @@ const controlFlow: Scenario = {
           id: 'b-loop2-poll',
           type: 'action',
           label: 'ステータス確認',
-          slot: 8,
+          slot: 3,
           deps: [],
           parentBlockId: 'b-loop2',
         },
@@ -225,7 +228,7 @@ const controlFlow: Scenario = {
           id: 'b-done',
           type: 'action',
           label: '完了通知',
-          slot: 9,
+          slot: 4,
           deps: ['b-loop2'],
         },
       ],
@@ -272,42 +275,41 @@ const switchDemo: Scenario = {
             cases: ['ok', 'warn', 'error', 'default'],
           },
         },
-        // ok lane
+        // All four lanes at column 1 — the switch container
+        // header sits above and each case stacks vertically in
+        // its own lane inside the frame.
         {
           id: 'b-ok',
           type: 'action',
           label: '正常処理',
-          slot: 2,
+          slot: 1,
           deps: [],
           parentBlockId: 'b-switch',
           parentBranch: 'ok',
         },
-        // warn lane
         {
           id: 'b-warn',
           type: 'action',
           label: '警告ログ',
-          slot: 2,
+          slot: 1,
           deps: [],
           parentBlockId: 'b-switch',
           parentBranch: 'warn',
         },
-        // error lane
         {
           id: 'b-err',
           type: 'action',
           label: 'エラー通知',
-          slot: 2,
+          slot: 1,
           deps: [],
           parentBlockId: 'b-switch',
           parentBranch: 'error',
         },
-        // default fallback
         {
           id: 'b-def',
           type: 'action',
           label: '不明ステータス',
-          slot: 2,
+          slot: 1,
           deps: [],
           parentBlockId: 'b-switch',
           parentBranch: 'default',
@@ -316,7 +318,7 @@ const switchDemo: Scenario = {
           id: 'b-done',
           type: 'action',
           label: '完了通知',
-          slot: 3,
+          slot: 2,
           deps: ['b-switch'],
         },
       ],

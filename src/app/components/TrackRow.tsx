@@ -76,27 +76,28 @@ export function TrackRow({
   };
 
   // Compute container-frame rects for every loop / branch / switch
-  // on this track. Each frame carries the list of "cases" (lane
-  // labels) so the renderer can split the interior into vertical
-  // lanes — branches get ['then','else'], switches get whatever
-  // ``params.cases`` declares, loops have a single empty-string
-  // lane.
+  // on this track. Flow-control blocks are rendered AS these
+  // frames (not as standalone BlockViews), so each frame carries
+  // enough metadata for the renderer to draw a Blender-node-style
+  // header + lane split + status coloring + click handler.
   //
-  // Empty containers still get a ghost frame so the drop zone is
-  // visible. Sorted by fromSlot so overlapping frames layer
-  // predictably (leftmost rendered first).
+  // Empty containers still get a minimum 1-slot frame so the drop
+  // zone is visible. Sorted by fromSlot so overlapping frames
+  // layer predictably (leftmost rendered first).
   const containerFrames = useMemo(() => {
-    const frames: Array<{
-      id: string;
+    interface FrameInfo {
+      block: Block;
       parentType: 'loop' | 'branch' | 'switch';
       label: string;
       color: string;
       fromSlot: number;
       toSlot: number;
       empty: boolean;
-      /** Lane labels, top-to-bottom. Empty string = single lane. */
       cases: string[];
-    }> = [];
+      /** Short summary line shown on the header (e.g. `× 3`, `case ...`). */
+      summary: string;
+    }
+    const frames: FrameInfo[] = [];
     for (const parent of track.blocks) {
       if (
         parent.type !== 'loop' &&
@@ -105,18 +106,14 @@ export function TrackRow({
       ) {
         continue;
       }
+      const rawParams =
+        (parent.params as Record<string, unknown> | undefined) ?? {};
       const cases: string[] =
         parent.type === 'branch'
           ? ['then', 'else']
           : parent.type === 'switch'
-            ? Array.isArray(
-                (parent.params as Record<string, unknown> | undefined)?.cases,
-              )
-              ? (
-                  (parent.params as { cases: unknown[] }).cases.map((c) =>
-                    String(c),
-                  )
-                )
+            ? Array.isArray(rawParams.cases)
+              ? (rawParams.cases as unknown[]).map((c) => String(c))
               : ['case_0']
             : [''];
       const children = track.blocks.filter(
@@ -135,8 +132,23 @@ export function TrackRow({
         fromSlot = Math.min(parent.slot, childMin);
         toSlot = Math.max(parent.slot, childMax);
       }
+
+      // A tiny one-line description rendered on the header's right
+      // edge so the user can tell loops with different iteration
+      // counts apart without opening the Inspector.
+      let summary = '';
+      if (parent.type === 'loop') {
+        if (rawParams.whileCondition !== undefined) {
+          summary = 'while';
+        } else if (typeof rawParams.iterations === 'number') {
+          summary = `× ${rawParams.iterations}`;
+        }
+      } else if (parent.type === 'switch') {
+        summary = `${cases.length} cases`;
+      }
+
       frames.push({
-        id: parent.id,
+        block: parent,
         parentType: parent.type,
         label: parent.label,
         color: BLOCK_META[parent.type].color,
@@ -144,6 +156,7 @@ export function TrackRow({
         toSlot,
         empty,
         cases,
+        summary,
       });
     }
     frames.sort((a, b) => a.fromSlot - b.fromSlot);
@@ -151,8 +164,11 @@ export function TrackRow({
   }, [track.blocks]);
 
   // Row height grows to fit the widest lane stack on this track.
-  // Two lanes fit inside TRACK_H natively; 3+ lanes add LANE_H
-  // per extra lane so children render at a readable height.
+  // Each container card carries a 16 px header plus `laneCount`
+  // lanes of minimum LANE_H. TRACK_H (72 px) is the baseline for
+  // tracks with no multi-lane container, giving a single ~56 px
+  // block slot plus padding.
+  const FRAME_HEADER_H = 16;
   const maxLanes = useMemo(() => {
     let n = 1;
     for (const f of containerFrames) {
@@ -160,20 +176,28 @@ export function TrackRow({
     }
     return n;
   }, [containerFrames]);
-  const trackHeight = Math.max(TRACK_H, maxLanes * LANE_H + 16);
+  const trackHeight = Math.max(
+    TRACK_H,
+    FRAME_HEADER_H + maxLanes * LANE_H + 16,
+  );
 
-  // Per-block lane info keyed by block.id. Top-level blocks live
-  // on lane -1 (full row). Children of a multi-case container get
-  // (laneIndex, laneCount) so BlockView can offset + size itself.
+  // Per-block lane info keyed by block.id. Top-level blocks are
+  // absent (the full row is theirs). Children of ANY container —
+  // including single-lane loops — get an entry so BlockView knows
+  // to position below the container's header strip. Branches and
+  // switches add laneIndex > 0 for the non-first lane.
   const blockLanes = useMemo(() => {
     const out: Record<
       string,
       { laneIndex: number; laneCount: number; color: string }
     > = {};
     for (const f of containerFrames) {
-      if (f.cases.length <= 1) continue; // loops: full-height children
       for (const child of track.blocks) {
-        if (child.parentBlockId !== f.id) continue;
+        if (child.parentBlockId !== f.block.id) continue;
+        if (f.cases.length <= 1) {
+          out[child.id] = { laneIndex: 0, laneCount: 1, color: f.color };
+          continue;
+        }
         const label = child.parentBranch ?? f.cases[0];
         const idx = f.cases.indexOf(label);
         if (idx < 0) continue;
@@ -201,7 +225,7 @@ export function TrackRow({
     onCanvasClick(
       track.id,
       slot,
-      parent ? { blockId: parent.id } : undefined,
+      parent ? { blockId: parent.block.id } : undefined,
     );
   };
 
@@ -315,63 +339,116 @@ export function TrackRow({
           </div>
         )}
 
-        {/* Container frames (loop / branch / switch scope
-            visualisation). Rendered behind the blocks so they stay
-            interactive. Multi-case containers draw horizontal
-            dividers between lanes + a label per lane so the
-            TRUE/FALSE or per-case boundaries are obvious. */}
+        {/* Container cards — loop / branch / switch rendered as
+            Blender-node-style panels. The header strip at the top
+            carries the icon + label + a tiny summary and is click-
+            selectable so the Inspector still works. The body below
+            is split into horizontal case lanes with per-lane labels
+            pinned to the right edge.
+            See docs/03-nodes.md (rev2). */}
         {containerFrames.map((f) => {
           const left = f.fromSlot * SLOT_PX + BLOCK_MARGIN / 2;
           const width =
             (f.toSlot - f.fromSlot + 1) * SLOT_PX - BLOCK_MARGIN;
-          const borderAlpha = f.empty ? '44' : '88';
-          const bgAlpha = f.empty ? '08' : '0f';
+          const status = blockStatus[f.block.id] ?? 'idle';
+          const selected = selectedBlockId === f.block.id;
+          const running = status === 'running';
+          const failed = status === 'error';
+          const skipped = status === 'skipped' || status === 'cancelled';
+
+          const borderColor = failed
+            ? '#ef4444'
+            : selected || running
+              ? f.color
+              : `${f.color}${f.empty ? '55' : '88'}`;
+          const bgColor = failed
+            ? '#ef44440c'
+            : `${f.color}${f.empty ? '0a' : '12'}`;
+          const shadow = running
+            ? `0 0 14px ${f.color}66`
+            : failed
+              ? '0 0 14px #ef444466'
+              : selected
+                ? `0 0 0 1px ${f.color}aa`
+                : 'none';
+
           const multiLane = f.cases.length > 1;
           const frameTop = 3;
           const frameBottom = 3;
+          const headerH = 16;
           const frameHeight = trackHeight - frameTop - frameBottom;
+          const bodyTop = headerH;
+          const bodyHeight = frameHeight - headerH;
           const laneHeight = multiLane
-            ? frameHeight / f.cases.length
-            : frameHeight;
+            ? bodyHeight / f.cases.length
+            : bodyHeight;
           return (
             <div
-              key={f.id}
-              className="pointer-events-none absolute rounded-lg border-[1.5px] border-dashed"
+              key={f.block.id}
+              className="pointer-events-none absolute overflow-hidden rounded-lg border-[1.5px]"
               style={{
                 left,
                 width,
                 top: frameTop,
                 bottom: frameBottom,
-                borderColor: `${f.color}${borderAlpha}`,
-                background: `${f.color}${bgAlpha}`,
+                borderColor,
+                background: bgColor,
+                boxShadow: shadow,
+                borderStyle: skipped ? 'dashed' : 'solid',
+                opacity: skipped ? 0.55 : 1,
                 zIndex: 0,
               }}
               title={
                 f.empty
                   ? `${f.label} (空のボディ — ブロックをドロップして配置)`
-                  : `${f.label} (内包ブロックをまとめて表示)`
+                  : f.label
               }
             >
-              <div
-                className="absolute top-0 flex items-center gap-1 rounded-br-md px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider"
+              {/* Header bar — click-selectable */}
+              <button
+                type="button"
+                className="pointer-events-auto absolute left-0 right-0 top-0 flex cursor-pointer items-center gap-1 px-1.5 text-left"
                 style={{
-                  left: 0,
-                  color: f.color,
-                  background: `${f.color}22`,
-                  opacity: f.empty ? 0.55 : 1,
+                  height: headerH,
+                  background: `${f.color}${selected || running ? '3a' : '22'}`,
+                  borderBottom: `1px solid ${f.color}55`,
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  onSelectBlock(track.id, f.block.id);
                 }}
               >
-                {f.label}
-              </div>
+                <span
+                  className="font-mono text-[9px] font-bold tracking-wider"
+                  style={{ color: f.color }}
+                >
+                  {BLOCK_META[f.parentType].icon} {f.label}
+                </span>
+                {f.summary && (
+                  <span
+                    className="ml-auto font-mono text-[8px] font-bold"
+                    style={{ color: `${f.color}cc` }}
+                  >
+                    {f.summary}
+                  </span>
+                )}
+                {running && (
+                  <span
+                    className="ml-1 flex h-2 w-2 animate-pulse rounded-full"
+                    style={{ background: f.color }}
+                    title="実行中"
+                  />
+                )}
+              </button>
+
               {/* Lane dividers + per-lane labels */}
               {multiLane &&
                 f.cases.map((caseLabel, i) => {
-                  const top = i * laneHeight;
-                  const isLast = i === f.cases.length - 1;
+                  const top = bodyTop + i * laneHeight;
                   return (
                     <div
                       key={`${caseLabel}-${i}`}
-                      className="absolute"
+                      className="pointer-events-none absolute"
                       style={{
                         top,
                         left: 0,
@@ -382,12 +459,10 @@ export function TrackRow({
                       }}
                     >
                       <span
-                        className="absolute right-1 font-mono text-[8px] font-bold uppercase tracking-wider"
+                        className="absolute right-1 top-0.5 font-mono text-[8px] font-bold uppercase tracking-wider"
                         style={{
-                          top: isLast ? undefined : 1,
-                          bottom: isLast ? 1 : undefined,
                           color: f.color,
-                          opacity: 0.75,
+                          opacity: 0.7,
                         }}
                       >
                         {caseLabel}
@@ -395,10 +470,14 @@ export function TrackRow({
                     </div>
                   );
                 })}
+
               {f.empty && (
                 <div
-                  className="absolute inset-0 flex items-center justify-center font-mono text-[9px]"
-                  style={{ color: `${f.color}88` }}
+                  className="pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[9px]"
+                  style={{
+                    color: `${f.color}88`,
+                    paddingTop: headerH,
+                  }}
                 >
                   ここに内包ブロックをドロップ
                 </div>
@@ -424,25 +503,38 @@ export function TrackRow({
           />
         )}
 
-        {track.blocks.map((b) => (
-          <BlockView
-            key={b.id}
-            block={b}
-            trackId={track.id}
-            status={blockStatus[b.id] ?? 'idle'}
-            selected={selectedBlockId === b.id}
-            linkSource={linkSourceBlockId === b.id}
-            draggable={blocksDraggable}
-            slotBounds={slotBounds[b.id]}
-            containerFrames={containerFrames}
-            lane={blockLanes[b.id]}
-            trackHeight={trackHeight}
-            subroutines={subroutines}
-            onSelect={onSelectBlock}
-            onUpdate={onUpdateBlock}
-            onDelete={onDeleteBlock}
-          />
-        ))}
+        {track.blocks.map((b) => {
+          // Flow-control blocks render AS their container frame via
+          // the `containerFrames` loop above — skip the standalone
+          // BlockView so we don't draw two labels for the same
+          // thing.
+          if (
+            b.type === 'loop' ||
+            b.type === 'branch' ||
+            b.type === 'switch'
+          ) {
+            return null;
+          }
+          return (
+            <BlockView
+              key={b.id}
+              block={b}
+              trackId={track.id}
+              status={blockStatus[b.id] ?? 'idle'}
+              selected={selectedBlockId === b.id}
+              linkSource={linkSourceBlockId === b.id}
+              draggable={blocksDraggable}
+              slotBounds={slotBounds[b.id]}
+              containerFrames={containerFrames}
+              lane={blockLanes[b.id]}
+              trackHeight={trackHeight}
+              subroutines={subroutines}
+              onSelect={onSelectBlock}
+              onUpdate={onUpdateBlock}
+              onDelete={onDeleteBlock}
+            />
+          );
+        })}
       </div>
     </div>
   );
