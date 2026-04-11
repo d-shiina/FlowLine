@@ -71,8 +71,20 @@ export interface NodeManifestEntry {
   onError: string;
 }
 
+export interface NodeLoadError {
+  path: string;
+  module: string;
+  message: string;
+  traceback: string;
+}
+
 type InboundFrame =
-  | { type: 'ready'; nodes: NodeManifestEntry[] }
+  | {
+      type: 'ready';
+      nodes: NodeManifestEntry[];
+      loadErrors?: NodeLoadError[];
+      reloaded?: boolean;
+    }
   | NodeLogFrame
   | NodeResultFrame
   | { type: 'fatal'; message: string };
@@ -86,7 +98,23 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 let child: ChildProcessWithoutNullStreams | null = null;
 let readyPromise: Promise<NodeManifestEntry[]> | null = null;
 let manifest: NodeManifestEntry[] = [];
+let loadErrors: NodeLoadError[] = [];
 let idleTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Pending resolver for an in-flight reload. Only one reload runs
+ * at a time — parallel callers await the same promise so the UI
+ * doesn't queue multiple reload frames into the worker.
+ */
+let reloadPending:
+  | {
+      resolve: (result: {
+        manifest: NodeManifestEntry[];
+        loadErrors: NodeLoadError[];
+      }) => void;
+      reject: (err: Error) => void;
+    }
+  | null = null;
 
 /**
  * In-flight requests keyed by reqId. Each entry stores the renderer
@@ -190,10 +218,23 @@ function handleFrame(
 ): void {
   if (frame.type === 'ready') {
     manifest = frame.nodes;
-    onReady(null, frame.nodes);
+    loadErrors = frame.loadErrors ?? [];
+    if (frame.reloaded && reloadPending) {
+      reloadPending.resolve({ manifest, loadErrors });
+      reloadPending = null;
+    } else {
+      // Initial ready after spawn — settle the boot promise.
+      onReady(null, frame.nodes);
+    }
     return;
   }
   if (frame.type === 'fatal') {
+    // Fatal during reload surfaces the error to the reload caller
+    // too, not just the boot promise.
+    if (reloadPending) {
+      reloadPending.reject(new Error(frame.message));
+      reloadPending = null;
+    }
     onReady(new Error(frame.message));
     for (const [, p] of pending) {
       p.reject(new Error(frame.message));
@@ -308,6 +349,61 @@ export function cancelNode(reqId: string): void {
 /** Return the cached node manifest. Empty array if worker not up yet. */
 export function getManifest(): NodeManifestEntry[] {
   return manifest;
+}
+
+/** Return the most recent load-error list reported by the worker. */
+export function getLoadErrors(): NodeLoadError[] {
+  return loadErrors;
+}
+
+/**
+ * Ask the worker to rescan ``_runtime/nodes/`` and rebuild its
+ * registry, then wait for the resulting ``ready`` frame. Used by
+ * the node editor after saving a file so the new source takes
+ * effect immediately without restarting the worker.
+ *
+ * If the worker isn't running yet, this spawns it — the first
+ * spawn's manifest is equivalent to a "reload" anyway.
+ */
+export async function reloadWorker(): Promise<{
+  manifest: NodeManifestEntry[];
+  loadErrors: NodeLoadError[];
+}> {
+  if (!child) {
+    const m = await ensureWorkerReady();
+    return { manifest: m, loadErrors };
+  }
+  clearIdleTimer();
+  if (reloadPending) {
+    // Someone else already asked; piggy-back on their promise.
+    return new Promise((resolve, reject) => {
+      const existing = reloadPending;
+      if (!existing) {
+        // Race: cleared between the check and here.
+        reloadWorker().then(resolve, reject);
+        return;
+      }
+      const prevResolve = existing.resolve;
+      const prevReject = existing.reject;
+      existing.resolve = (result) => {
+        prevResolve(result);
+        resolve(result);
+      };
+      existing.reject = (err) => {
+        prevReject(err);
+        reject(err);
+      };
+    });
+  }
+  return new Promise((resolve, reject) => {
+    reloadPending = { resolve, reject };
+    try {
+      writeToWorker({ type: 'reload' });
+    } catch (err) {
+      reloadPending = null;
+      reject(err as Error);
+    }
+  });
 }
 
 /**

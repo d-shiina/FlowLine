@@ -4,6 +4,7 @@ import {
   Upload,
   Download,
   BookOpen,
+  Code2,
   Sun,
   Moon,
   Terminal,
@@ -22,6 +23,9 @@ interface Props {
   onOpenVariables: () => void;
   /** Number of scenario-scope variables, shown as a badge on the chip. */
   variableCount: number;
+  onOpenNodeEditor: () => void;
+  /** Count of registered Python nodes, shown as a badge on the chip. */
+  nodeCount: number;
   scenarioName: string;
   onRenameScenario: (name: string) => void;
   theme: Theme;
@@ -44,6 +48,8 @@ export function Toolbar({
   onSample,
   onOpenVariables,
   variableCount,
+  onOpenNodeEditor,
+  nodeCount,
   scenarioName,
   onRenameScenario,
   theme,
@@ -94,6 +100,20 @@ export function Toolbar({
           {variableCount > 0 && (
             <span className="ml-0.5 rounded bg-fl-border-strong px-1 text-[9px] text-fl-text-dim">
               {variableCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenNodeEditor}
+          className={chipBase}
+          title="Python ノードを編集 / 新規作成"
+        >
+          <Code2 className="h-3 w-3" /> ノード
+          {nodeCount > 0 && (
+            <span className="ml-0.5 rounded bg-fl-border-strong px-1 text-[9px] text-fl-text-dim">
+              {nodeCount}
             </span>
           )}
         </button>

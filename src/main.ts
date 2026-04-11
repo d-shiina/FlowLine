@@ -5,11 +5,19 @@ import { detectPython, installPython } from './main/pythonRuntime';
 import {
   cancelNode,
   ensureWorkerReady,
+  getLoadErrors,
   getManifest,
+  reloadWorker,
   runNode,
   shutdownWorker,
   type RunNodeRequest,
 } from './main/pythonWorker';
+import {
+  deleteNodeSource,
+  listNodeFiles,
+  readNodeSource,
+  writeNodeSource,
+} from './main/nodeFiles';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -135,6 +143,68 @@ ipcMain.handle('runtime:ensure-worker', async () => {
 });
 
 ipcMain.handle('runtime:node-manifest', async () => getManifest());
+
+ipcMain.handle('runtime:node-load-errors', async () => getLoadErrors());
+
+// ── Node editor IPC ────────────────────────────────────────────────
+// The in-app Python node editor reads / writes files under
+// `_runtime/nodes/` through these handlers. The main process is
+// the only place that touches the filesystem — the renderer
+// never gets a raw path — and nodeFiles.ts rejects path traversal
+// so a malicious file path can't escape the sandbox.
+ipcMain.handle('runtime:list-nodes', async () => {
+  try {
+    const files = await listNodeFiles();
+    return { ok: true, files };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message ?? String(err) };
+  }
+});
+
+ipcMain.handle(
+  'runtime:read-node',
+  async (_e, relPath: string) => {
+    try {
+      const source = await readNodeSource(relPath);
+      return { ok: true, source };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message ?? String(err) };
+    }
+  },
+);
+
+ipcMain.handle(
+  'runtime:write-node',
+  async (_e, args: { path: string; source: string }) => {
+    try {
+      await writeNodeSource(args.path, args.source);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message ?? String(err) };
+    }
+  },
+);
+
+ipcMain.handle(
+  'runtime:delete-node',
+  async (_e, relPath: string) => {
+    try {
+      await deleteNodeSource(relPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message ?? String(err) };
+    }
+  },
+);
+
+ipcMain.handle('runtime:reload-nodes', async () => {
+  try {
+    const result = await reloadWorker();
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message ?? String(err) };
+  }
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.

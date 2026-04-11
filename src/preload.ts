@@ -95,4 +95,20 @@ contextBridge.exposeInMainWorld('flowlineRuntime', {
     ipcRenderer.on('runtime:node-log', handler);
     return () => ipcRenderer.off('runtime:node-log', handler);
   },
+  // ── Node editor ────────────────────────────────────────────
+  /** Enumerate node source files under ``_runtime/nodes/``. */
+  listNodeFiles: () => ipcRenderer.invoke('runtime:list-nodes'),
+  /** Read a node source file by forward-slash relative path. */
+  readNodeSource: (relPath: string) =>
+    ipcRenderer.invoke('runtime:read-node', relPath),
+  /** Create or overwrite a node source file. */
+  writeNodeSource: (relPath: string, source: string) =>
+    ipcRenderer.invoke('runtime:write-node', { path: relPath, source }),
+  /** Delete a node source file. Missing files succeed silently. */
+  deleteNodeSource: (relPath: string) =>
+    ipcRenderer.invoke('runtime:delete-node', relPath),
+  /** Re-scan _runtime/nodes/ and rebuild the worker registry. */
+  reloadNodes: () => ipcRenderer.invoke('runtime:reload-nodes'),
+  /** Fetch the most recent load-error list reported by the worker. */
+  loadErrors: () => ipcRenderer.invoke('runtime:node-load-errors'),
 });

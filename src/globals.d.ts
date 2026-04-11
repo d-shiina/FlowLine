@@ -77,6 +77,18 @@ export interface NodeLogFrame {
   message: string;
 }
 
+export interface NodeFileEntry {
+  path: string;
+  size: number;
+}
+
+export interface NodeLoadError {
+  path: string;
+  module: string;
+  message: string;
+  traceback: string;
+}
+
 export interface FlowlineRuntimeAPI {
   status(): Promise<PythonStatus>;
   install(): Promise<{ ok: boolean; error?: string }>;
@@ -94,6 +106,28 @@ export interface FlowlineRuntimeAPI {
   >;
   cancelNode(reqId: string): Promise<void>;
   onNodeLog(cb: (frame: NodeLogFrame) => void): () => void;
+  // Node editor
+  listNodeFiles(): Promise<
+    { ok: true; files: NodeFileEntry[] } | { ok: false; error: string }
+  >;
+  readNodeSource(
+    relPath: string,
+  ): Promise<
+    | { ok: true; source: string | null }
+    | { ok: false; error: string }
+  >;
+  writeNodeSource(
+    relPath: string,
+    source: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
+  deleteNodeSource(
+    relPath: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }>;
+  reloadNodes(): Promise<
+    | { ok: true; manifest: NodeManifestEntry[]; loadErrors: NodeLoadError[] }
+    | { ok: false; error: string }
+  >;
+  loadErrors(): Promise<NodeLoadError[]>;
 }
 
 declare global {

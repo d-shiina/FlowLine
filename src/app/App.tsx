@@ -23,6 +23,7 @@ import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
 import { SamplesModal } from './components/SamplesModal';
 import { VariablesModal } from './components/VariablesModal';
+import { NodeEditor } from './components/NodeEditor';
 import { PythonInstallModal } from './components/PythonInstallModal';
 import type { PythonStatus } from '../globals';
 import { GraphEdges } from './components/GraphEdges';
@@ -472,11 +473,13 @@ export default function App() {
   // node picker / ports editor / params editor. Empty array when
   // the worker isn't up, which makes those panels fall back to
   // "(未設定 / Mock で実行)" — the UI stays fully usable.
-  const { manifest: nodeManifest } = useNodeManifest();
+  const { manifest: nodeManifest, setManifest: setNodeManifest } =
+    useNodeManifest();
 
-  // ─── samples + variables ──────────────────────────────────────────
+  // ─── samples + variables + node editor ────────────────────────────
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [variablesOpen, setVariablesOpen] = useState(false);
+  const [nodeEditorOpen, setNodeEditorOpen] = useState(false);
   const handleLoadSample = useCallback(
     (next: Scenario) => {
       store.replace(next);
@@ -627,6 +630,8 @@ export default function App() {
         onSample={() => setSamplesOpen(true)}
         onOpenVariables={() => setVariablesOpen(true)}
         variableCount={Object.keys(scenario.variables.scenario).length}
+        onOpenNodeEditor={() => setNodeEditorOpen(true)}
+        nodeCount={nodeManifest.length}
         scenarioName={scenario.name}
         onRenameScenario={store.renameScenario}
         theme={theme}
@@ -982,6 +987,12 @@ export default function App() {
         onSet={store.setVariable}
         onRename={store.renameVariable}
         onDelete={store.deleteVariable}
+      />
+      <NodeEditor
+        open={nodeEditorOpen}
+        onOpenChange={setNodeEditorOpen}
+        onManifestChanged={setNodeManifest}
+        pythonReady={pythonChipState === 'ready'}
       />
       <PythonInstallModal
         open={pythonModalOpen}

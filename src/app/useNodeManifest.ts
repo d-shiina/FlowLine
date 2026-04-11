@@ -9,6 +9,12 @@ export interface UseNodeManifest {
   error: string | null;
   /** Re-fetch the manifest (and optionally re-spawn a crashed worker). */
   refresh: () => Promise<void>;
+  /**
+   * Force-update the cached manifest. Used by the NodeEditor after
+   * saving a file + reloading the worker, so subscribers see the
+   * new registrations without a separate spawn roundtrip.
+   */
+  setManifest: (next: NodeManifestEntry[]) => void;
 }
 
 /**
@@ -80,5 +86,5 @@ export function useNodeManifest(): UseNodeManifest {
     void refresh();
   }, [refresh]);
 
-  return { manifest, loading, error, refresh };
+  return { manifest, loading, error, refresh, setManifest };
 }

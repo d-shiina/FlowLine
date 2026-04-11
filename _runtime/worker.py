@@ -115,24 +115,30 @@ def log_stderr(msg: str) -> None:
 # ──────────────────────────────────────────────────────────────────
 
 
-def discover_nodes() -> None:
+def discover_nodes() -> list[Dict[str, Any]]:
     """Import every ``*.py`` under ``_runtime/nodes/`` so their
     ``@flowline.node`` decorators populate ``flowline.REGISTRY``.
 
-    Individual file failures log to stderr and are otherwise
-    swallowed so one broken node can't brick a worker. The
-    exception is ``NodeIdCollisionError``, which is a hard-error
-    the worker re-raises so the engine learns about the conflict
-    via ``fatal``.
+    Returns a list of load-error records for files that failed to
+    import, so the engine can surface them in the node editor
+    instead of silently dropping a broken node. The exception is
+    ``NodeIdCollisionError``, which is a hard-error the worker
+    re-raises so main() converts it to a ``fatal`` frame.
+
+    Each error record carries the relative path to the source
+    file (from ``_runtime/``), the exception message, and the
+    full traceback so the editor can show a meaningful diagnostic.
     """
+    errors: list[Dict[str, Any]] = []
     base = _ROOT / "nodes"
     if not base.exists():
-        return
+        return errors
     for py in sorted(base.rglob("*.py")):
         if py.name.startswith("_"):
             continue
         rel = py.relative_to(_ROOT).with_suffix("")
         module_name = ".".join(rel.parts)
+        rel_path = str(py.relative_to(_ROOT)).replace(os.sep, "/")
         try:
             spec = importlib.util.spec_from_file_location(module_name, py)
             if spec is None or spec.loader is None:
@@ -144,8 +150,18 @@ def discover_nodes() -> None:
             # Bubble up so main() converts it to a ``fatal`` frame.
             raise
         except Exception as exc:
+            tb = traceback.format_exc()
             log_stderr(f"failed to load {module_name}: {exc}")
-            log_stderr(traceback.format_exc())
+            log_stderr(tb)
+            errors.append(
+                {
+                    "path": rel_path,
+                    "module": module_name,
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "traceback": tb,
+                }
+            )
+    return errors
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -409,6 +425,46 @@ def handle_reset() -> None:
             _current.cancel_event.set()
 
 
+def handle_reload() -> None:
+    """Re-scan ``_runtime/nodes/`` and rebuild the registry.
+
+    Used by the node editor after a file is created or saved.
+    We purge the previous ``flowline.REGISTRY`` and anything we
+    loaded under the ``nodes.*`` module namespace from
+    ``sys.modules`` so a second ``discover_nodes()`` picks up
+    changed source. Emits a fresh ``ready`` frame with the new
+    manifest + load errors so the main process can update its
+    cache and the renderer's editor can show import failures
+    inline.
+    """
+    with _current_lock:
+        if _current is not None:
+            # Don't reload while a node is running — the new
+            # registry pointer could swap under the thread. Just
+            # signal cancel and bail; the caller will retry.
+            _current.cancel_event.set()
+    flowline.REGISTRY.clear()
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith("nodes."):
+            del sys.modules[mod_name]
+    try:
+        errors = discover_nodes()
+    except flowline.NodeIdCollisionError as exc:
+        emit({"type": "fatal", "message": str(exc)})
+        log_stderr(f"node id collision on reload: {exc}")
+        return
+    emit(
+        {
+            "type": "ready",
+            "reloaded": True,
+            "nodes": [
+                _manifest_entry(spec) for spec in flowline.REGISTRY.values()
+            ],
+            "loadErrors": errors,
+        }
+    )
+
+
 def handle_shutdown() -> None:
     # Best-effort cancel any in-flight execution, then exit cleanly.
     with _current_lock:
@@ -445,7 +501,7 @@ def _manifest_entry(spec: flowline.NodeSpec) -> Dict[str, Any]:
 
 def main() -> None:
     try:
-        discover_nodes()
+        errors = discover_nodes()
     except flowline.NodeIdCollisionError as exc:
         # Fatal: refuse to start rather than serve an ambiguous
         # registry. The engine surfaces this as a startup error.
@@ -459,6 +515,7 @@ def main() -> None:
             "nodes": [
                 _manifest_entry(spec) for spec in flowline.REGISTRY.values()
             ],
+            "loadErrors": errors,
         }
     )
 
@@ -483,6 +540,8 @@ def main() -> None:
                 handle_cancel(msg)
             elif kind == "reset":
                 handle_reset()
+            elif kind == "reload":
+                handle_reload()
             elif kind == "shutdown":
                 handle_shutdown()
                 return
