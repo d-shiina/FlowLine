@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
+import { detectPython, installPython } from './main/pythonRuntime';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -72,6 +73,24 @@ ipcMain.handle('window:close', (e) => {
 });
 ipcMain.handle('window:is-maximized', (e) => {
   return BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false;
+});
+
+// ── Python runtime IPC ─────────────────────────────────────────────
+// The renderer surfaces an install banner / modal when the isolated
+// Python interpreter isn't present in ``_runtime/python/``. On install
+// the main process downloads a pinned python-build-standalone bundle
+// and streams progress back through ``runtime:install-progress`` so
+// the UI can render a live progress bar without polling.
+ipcMain.handle('runtime:status', async () => {
+  return detectPython();
+});
+ipcMain.handle('runtime:install', async (e) => {
+  try {
+    await installPython(e.sender);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message ?? String(err) };
+  }
 });
 
 // This method will be called when Electron has finished

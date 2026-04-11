@@ -93,3 +93,6 @@ out/
 
 # Local build output
 dist/
+
+# Locally-installed Python runtime (python-build-standalone extract)
+_runtime/python/

@@ -21,6 +21,8 @@ import { SyncLine } from './components/SyncLine';
 import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
 import { SamplesModal } from './components/SamplesModal';
+import { PythonInstallModal } from './components/PythonInstallModal';
+import type { PythonStatus } from '../globals';
 import { GraphEdges } from './components/GraphEdges';
 import { SubroutineSidebar } from './components/SubroutineSidebar';
 import { Inspector } from './components/Inspector';
@@ -374,6 +376,42 @@ export default function App() {
     }
   };
 
+  // ─── python runtime status ────────────────────────────────────────
+  // On first mount, ask the main process whether the isolated Python
+  // runtime is present. If it isn't, pop the install modal automatically
+  // so first-run users are guided through the download. The status is
+  // also passed to the Toolbar chip so users can re-open the modal at
+  // any time (e.g. to verify the install directory).
+  const [pythonStatus, setPythonStatus] = useState<PythonStatus | null>(null);
+  const [pythonModalOpen, setPythonModalOpen] = useState(false);
+
+  const refreshPythonStatus = useCallback(async () => {
+    const api = window.flowlineRuntime;
+    if (!api) return null;
+    const s = await api.status();
+    setPythonStatus(s);
+    return s;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const s = await refreshPythonStatus();
+      if (!cancelled && s && !s.pythonPath) {
+        setPythonModalOpen(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshPythonStatus]);
+
+  const pythonChipState: 'ready' | 'missing' | 'unknown' = pythonStatus
+    ? pythonStatus.pythonPath
+      ? 'ready'
+      : 'missing'
+    : 'unknown';
+
   // ─── samples ───────────────────────────────────────────────────────
   const [samplesOpen, setSamplesOpen] = useState(false);
   const handleLoadSample = useCallback(
@@ -528,6 +566,8 @@ export default function App() {
         onRenameScenario={store.renameScenario}
         theme={theme}
         onToggleTheme={toggleTheme}
+        pythonState={pythonChipState}
+        onOpenPythonInstall={() => setPythonModalOpen(true)}
       />
 
       <input
@@ -857,6 +897,14 @@ export default function App() {
         open={samplesOpen}
         onOpenChange={setSamplesOpen}
         onLoad={handleLoadSample}
+      />
+      <PythonInstallModal
+        open={pythonModalOpen}
+        onOpenChange={setPythonModalOpen}
+        status={pythonStatus}
+        onInstalled={() => {
+          void refreshPythonStatus();
+        }}
       />
     </div>
   );
