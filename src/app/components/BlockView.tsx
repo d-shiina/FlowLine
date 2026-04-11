@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BLOCK_META, type Block } from '../types';
+import { BLOCK_META, type Block, type Subroutine } from '../types';
 import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
 
 interface Props {
@@ -8,6 +8,7 @@ interface Props {
   active: boolean;
   past: boolean;
   selected: boolean;
+  subroutines: Subroutine[];
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
   onDelete: (trackId: string, blockId: string) => void;
@@ -78,12 +79,23 @@ export function BlockView({
   active,
   past,
   selected,
+  subroutines,
   onSelect,
   onUpdate,
   onDelete,
 }: Props) {
   const meta = BLOCK_META[block.type];
   const [hov, setHov] = useState(false);
+  const subRef =
+    block.type === 'subroutine' && block.subroutineId
+      ? subroutines.find((s) => s.id === block.subroutineId)
+      : undefined;
+  const displayLabel =
+    block.type === 'subroutine'
+      ? subRef
+        ? subRef.name
+        : '(未割当)'
+      : block.label;
 
   const left = block.slot * SLOT_PX + BLOCK_MARGIN;
   const width = BLOCK_W;
@@ -159,10 +171,16 @@ export function BlockView({
         </div>
         <div
           className="truncate font-mono text-[11px]"
-          style={{ color: past ? '#334155' : '#cbd5e1' }}
-          title={block.label}
+          style={{
+            color: past
+              ? '#334155'
+              : block.type === 'subroutine' && !subRef
+                ? '#f59e0b'
+                : '#cbd5e1',
+          }}
+          title={displayLabel}
         >
-          {block.label}
+          {displayLabel}
         </div>
       </div>
 

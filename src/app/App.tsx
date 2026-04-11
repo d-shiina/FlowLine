@@ -18,6 +18,7 @@ import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
 import { SamplesModal } from './components/SamplesModal';
 import { GraphEdges } from './components/GraphEdges';
+import { SubroutineSidebar } from './components/SubroutineSidebar';
 import { Inspector } from './components/Inspector';
 
 /**
@@ -272,6 +273,14 @@ export default function App() {
       </div>
 
       <div className="flex min-h-0 flex-1">
+        <SubroutineSidebar
+          subroutines={scenario.subroutines}
+          onAdd={(name) => {
+            store.addSubroutine(name);
+          }}
+          onRename={store.renameSubroutine}
+          onDelete={store.deleteSubroutine}
+        />
         <div className="fl-scroll min-h-0 flex-1 overflow-auto">
           <div className="relative" style={{ minWidth: canvasWidth }}>
             {/* Ruler row */}
@@ -293,6 +302,7 @@ export default function App() {
                 totalSlots={totalSlots}
                 playheadSlot={playhead}
                 selectedBlockId={selected?.blockId ?? null}
+                subroutines={scenario.subroutines}
                 onRename={store.renameTrack}
                 onDelete={store.deleteTrack}
                 onUpdateBlock={store.updateBlock}
@@ -342,6 +352,7 @@ export default function App() {
               playheadSlot={-1}
               selectedBlockId={selected?.blockId ?? null}
               variant="error"
+              subroutines={scenario.subroutines}
               onRename={store.renameTrack}
               onDelete={store.deleteTrack}
               onUpdateBlock={store.updateBlock}
@@ -440,6 +451,7 @@ export default function App() {
           trackName={addModal.trackName}
           trackColor={addModal.trackColor}
           slot={addModal.slot}
+          subroutines={scenario.subroutines}
           onAdd={(block) => store.addBlock(addModal.trackId, block)}
         />
       )}

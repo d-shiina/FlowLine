@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import type { Block, Track } from '../types';
+import type { Block, Subroutine, Track } from '../types';
 import { HEADER_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
 import { BlockView } from './BlockView';
 
@@ -12,6 +12,7 @@ interface Props {
   playheadSlot: number;
   selectedBlockId: string | null;
   variant?: Variant;
+  subroutines: Subroutine[];
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
   onUpdateBlock: (
@@ -30,6 +31,7 @@ export function TrackRow({
   playheadSlot,
   selectedBlockId,
   variant = 'normal',
+  subroutines,
   onRename,
   onDelete,
   onUpdateBlock,
@@ -173,6 +175,7 @@ export function TrackRow({
               active={active}
               past={past}
               selected={selectedBlockId === b.id}
+              subroutines={subroutines}
               onSelect={onSelectBlock}
               onUpdate={onUpdateBlock}
               onDelete={onDeleteBlock}

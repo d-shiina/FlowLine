@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import type { Block, Scenario, SyncPoint, Track } from './types';
+import type { Block, Scenario, Subroutine, SyncPoint, Track } from './types';
 import { ERROR_HANDLER_COLOR, ERROR_HANDLER_ID, TRACK_COLORS } from './types';
 import { DEFAULT_SAMPLE, cloneSample } from './samples';
 
@@ -82,6 +82,10 @@ export interface ScenarioStore {
 
   addSync: (sp: SyncPoint) => void;
   deleteSync: (id: string) => void;
+
+  addSubroutine: (name: string) => Subroutine;
+  renameSubroutine: (id: string, name: string) => void;
+  deleteSubroutine: (id: string) => void;
 }
 
 export function useScenario(): ScenarioStore {
@@ -189,6 +193,46 @@ export function useScenario(): ScenarioStore {
     }));
   }, []);
 
+  const addSubroutine = useCallback((name: string): Subroutine => {
+    const sub: Subroutine = {
+      id: uid('sub'),
+      name: name.trim() || 'サブルーチン',
+      blocks: [],
+    };
+    setScenario((s) => ({ ...s, subroutines: [...s.subroutines, sub] }));
+    return sub;
+  }, []);
+
+  const renameSubroutine = useCallback((id: string, name: string) => {
+    setScenario((s) => ({
+      ...s,
+      subroutines: s.subroutines.map((sub) =>
+        sub.id === id ? { ...sub, name: name.trim() || sub.name } : sub,
+      ),
+    }));
+  }, []);
+
+  const deleteSubroutine = useCallback((id: string) => {
+    setScenario((s) => {
+      // Cascade: clear `subroutineId` on any block that referenced this
+      // subroutine, across regular tracks and the error handler.
+      const clearRef = (b: Block): Block =>
+        b.subroutineId === id ? { ...b, subroutineId: undefined } : b;
+      return {
+        ...s,
+        subroutines: s.subroutines.filter((sub) => sub.id !== id),
+        tracks: s.tracks.map((t) => ({
+          ...t,
+          blocks: t.blocks.map(clearRef),
+        })),
+        errorHandler: {
+          ...s.errorHandler,
+          blocks: s.errorHandler.blocks.map(clearRef),
+        },
+      };
+    });
+  }, []);
+
   return {
     scenario,
     replace,
@@ -200,5 +244,8 @@ export function useScenario(): ScenarioStore {
     deleteBlock,
     addSync,
     deleteSync,
+    addSubroutine,
+    renameSubroutine,
+    deleteSubroutine,
   };
 }

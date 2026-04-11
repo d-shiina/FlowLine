@@ -50,6 +50,8 @@ export interface Block {
   skipIfMissing?: boolean;
   /** Error handling policy. Undefined = abort. */
   onError?: OnError;
+  /** For `type: 'subroutine'` blocks, the id of the subroutine to call. */
+  subroutineId?: string;
 }
 
 export interface Track {

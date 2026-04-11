@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
-import { BLOCK_META, type Block, type BlockType } from '../types';
+import {
+  BLOCK_META,
+  type Block,
+  type BlockType,
+  type Subroutine,
+} from '../types';
 import { uid } from '../useScenario';
 
 interface Props {
@@ -9,6 +14,7 @@ interface Props {
   trackName: string;
   trackColor: string;
   slot: number;
+  subroutines: Subroutine[];
   onAdd: (block: Block) => void;
 }
 
@@ -45,22 +51,36 @@ export function AddBlockModal({
   trackName,
   trackColor,
   slot,
+  subroutines,
   onAdd,
 }: Props) {
   const [type, setType] = useState<BlockType>('action');
   const [label, setLabel] = useState('クリック');
   const [custom, setCustom] = useState('');
+  const [subroutineId, setSubroutineId] = useState<string>('');
+
+  const canAddSubroutineCall = subroutines.length > 0;
 
   const handleAdd = () => {
-    const finalLabel = custom || label || defaultLabel(type);
+    if (type === 'subroutine' && !subroutineId) return;
+    const sub =
+      type === 'subroutine'
+        ? subroutines.find((s) => s.id === subroutineId)
+        : undefined;
+    const finalLabel =
+      type === 'subroutine'
+        ? (sub?.name ?? defaultLabel(type))
+        : custom || label || defaultLabel(type);
     onAdd({
       id: uid('b'),
       type,
       label: finalLabel,
       slot,
       deps: [],
+      ...(type === 'subroutine' ? { subroutineId } : {}),
     });
     setCustom('');
+    setSubroutineId('');
     onOpenChange(false);
   };
 
@@ -101,6 +121,32 @@ export function AddBlockModal({
               );
             })}
           </div>
+
+          {type === 'subroutine' && (
+            <div className="mb-5">
+              <div className="mb-1.5 font-mono text-[10px] text-slate-600">
+                呼び出すサブルーチン
+              </div>
+              {canAddSubroutineCall ? (
+                <select
+                  value={subroutineId}
+                  onChange={(e) => setSubroutineId(e.target.value)}
+                  className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-2.5 py-1.5 font-mono text-[11px] text-slate-200 outline-none"
+                >
+                  <option value="">(選択してください)</option>
+                  {subroutines.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.blocks.length} blocks)
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="rounded-lg border border-dashed border-[#334155] bg-[#0f172a] p-3 text-center font-mono text-[10px] text-slate-600">
+                  左サイドバーから先にサブルーチンを定義してください
+                </div>
+              )}
+            </div>
+          )}
 
           {(type === 'action' || type === 'wait') && (
             <div className="mb-5">
@@ -145,7 +191,8 @@ export function AddBlockModal({
             <button
               type="button"
               onClick={handleAdd}
-              className="rounded-lg border-none bg-[#3B82F6] px-4 py-1.5 text-[12px] font-bold text-white"
+              disabled={type === 'subroutine' && !subroutineId}
+              className="rounded-lg border-none bg-[#3B82F6] px-4 py-1.5 text-[12px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               追加
             </button>
