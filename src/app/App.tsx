@@ -83,7 +83,15 @@ export default function App() {
   );
 
   // ─── mode + modals ─────────────────────────────────────────────────
-  const [mode, setMode] = useState<EditMode>('block');
+  const [mode, setModeState] = useState<EditMode>('block');
+  const [linkSource, setLinkSource] = useState<{
+    trackId: string;
+    blockId: string;
+  } | null>(null);
+  const setMode = useCallback((m: EditMode) => {
+    setModeState(m);
+    setLinkSource(null);
+  }, []);
   const [addModal, setAddModal] = useState<{
     trackId: string;
     trackName: string;
@@ -112,7 +120,35 @@ export default function App() {
 
   const isErrorHandlerSelection = selected?.trackId === ERROR_HANDLER_ID;
 
+  /**
+   * Resolve a dep id back to a human-readable label ("label #slot") by
+   * walking every block container. Used by the Inspector deps list.
+   */
+  const resolveDepLabel = useCallback(
+    (depId: string): string => {
+      const search = (blocks: Block[]) =>
+        blocks.find((b) => b.id === depId);
+      for (const t of scenario.tracks) {
+        const hit = search(t.blocks);
+        if (hit) return `${hit.label} #${hit.slot}`;
+      }
+      const ehHit = search(scenario.errorHandler.blocks);
+      if (ehHit) return `${ehHit.label} #${ehHit.slot}`;
+      for (const sub of scenario.subroutines) {
+        const hit = search(sub.blocks);
+        if (hit) return `${hit.label} #${hit.slot}`;
+      }
+      return depId;
+    },
+    [scenario],
+  );
+
   const handleCanvasClick = (trackId: string, slot: number) => {
+    // In link mode, clicking empty canvas cancels the pending link source.
+    if (mode === 'link') {
+      setLinkSource(null);
+      return;
+    }
     // The error handler track ignores sync mode — sync points don't apply.
     if (trackId === ERROR_HANDLER_ID) {
       setAddModal({
@@ -136,6 +172,33 @@ export default function App() {
       });
     }
   };
+
+  /**
+   * Click handler for blocks. In normal/sync mode this just selects the
+   * block. In link mode the first click sets the link source and the
+   * second click creates a dep edge (second block depends on first).
+   */
+  const handleBlockClick = useCallback(
+    (trackId: string, blockId: string) => {
+      if (mode === 'link') {
+        if (!linkSource) {
+          setLinkSource({ trackId, blockId });
+          return;
+        }
+        if (linkSource.blockId === blockId) {
+          setLinkSource(null); // clicking the source again cancels
+          return;
+        }
+        // Second click → add source as a dep of this block
+        store.addDep(trackId, blockId, linkSource.blockId);
+        setLinkSource(null);
+        setSelected({ trackId, blockId });
+        return;
+      }
+      setSelected({ trackId, blockId });
+    },
+    [mode, linkSource, store],
+  );
 
   // ─── JSON import / export ──────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -328,20 +391,25 @@ export default function App() {
       />
 
       <div className="flex flex-shrink-0 gap-5 border-b border-[#0f172a] bg-[#0a1020] px-5 py-1.5">
-        <div
-          className="text-[9px]"
-          style={{ color: mode === 'block' ? '#3B82F6' : '#334155' }}
-        >
-          {mode === 'block' ? '▶ キャンバスをクリックしてブロック配置' : ''}
-        </div>
-        <div
-          className="text-[9px]"
-          style={{ color: mode === 'sync' ? '#f43f5e' : '#334155' }}
-        >
-          {mode === 'sync' ? '⬡ キャンバスをクリックして同期ポイント配置' : ''}
-        </div>
+        {mode === 'block' && (
+          <div className="text-[9px] text-[#3B82F6]">
+            ▶ キャンバスをクリックしてブロック配置
+          </div>
+        )}
+        {mode === 'link' && (
+          <div className="text-[9px] text-[#60a5fa]">
+            {linkSource
+              ? '⟶ 2つ目のブロックをクリックで依存元 → 依存先のリンクを作成'
+              : '⟶ 依存元のブロックを選択してください'}
+          </div>
+        )}
+        {mode === 'sync' && (
+          <div className="text-[9px] text-[#f43f5e]">
+            ⬡ キャンバスをクリックして同期ポイント配置
+          </div>
+        )}
         <div className="ml-auto text-[9px] text-[#1e293b]">
-          ブロックドラッグ=スロット移動 / 占有済みなら自動で右シフト / ×=削除
+          ブロックドラッグ=スロット移動 / Ctrl+Z=元に戻す / Del=削除
         </div>
       </div>
 
@@ -375,6 +443,8 @@ export default function App() {
                 totalSlots={totalSlots}
                 playheadSlot={playhead}
                 selectedBlockId={selected?.blockId ?? null}
+                linkSourceBlockId={linkSource?.blockId ?? null}
+                blocksDraggable={mode === 'block'}
                 subroutines={scenario.subroutines}
                 onRename={store.renameTrack}
                 onDelete={store.deleteTrack}
@@ -383,9 +453,7 @@ export default function App() {
                   store.deleteBlock(tid, bid);
                   if (selected?.blockId === bid) setSelected(null);
                 }}
-                onSelectBlock={(tid, bid) =>
-                  setSelected({ trackId: tid, blockId: bid })
-                }
+                onSelectBlock={handleBlockClick}
                 onCanvasClick={handleCanvasClick}
               />
             ))}
@@ -424,6 +492,8 @@ export default function App() {
               totalSlots={totalSlots}
               playheadSlot={-1}
               selectedBlockId={selected?.blockId ?? null}
+              linkSourceBlockId={linkSource?.blockId ?? null}
+              blocksDraggable={mode === 'block'}
               variant="error"
               subroutines={scenario.subroutines}
               onRename={store.renameTrack}
@@ -433,9 +503,7 @@ export default function App() {
                 store.deleteBlock(tid, bid);
                 if (selected?.blockId === bid) setSelected(null);
               }}
-              onSelectBlock={(tid, bid) =>
-                setSelected({ trackId: tid, blockId: bid })
-              }
+              onSelectBlock={handleBlockClick}
               onCanvasClick={handleCanvasClick}
             />
 
@@ -486,7 +554,10 @@ export default function App() {
           block={selectedBlock}
           trackId={selected?.trackId ?? null}
           isErrorHandler={isErrorHandlerSelection}
+          linkMode={mode === 'link'}
+          resolveDepLabel={resolveDepLabel}
           onChange={store.updateBlock}
+          onRemoveDep={store.removeDep}
           onClose={() => setSelected(null)}
         />
       </div>

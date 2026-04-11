@@ -5,7 +5,11 @@ interface Props {
   block: Block | null;
   trackId: string | null;
   isErrorHandler: boolean;
+  linkMode: boolean;
+  /** Resolves a depId back to a human-readable label if possible. */
+  resolveDepLabel: (depId: string) => string;
   onChange: (trackId: string, blockId: string, patch: Partial<Block>) => void;
+  onRemoveDep: (trackId: string, blockId: string, depId: string) => void;
   onClose: () => void;
 }
 
@@ -37,7 +41,10 @@ export function Inspector({
   block,
   trackId,
   isErrorHandler,
+  linkMode,
+  resolveDepLabel,
   onChange,
+  onRemoveDep,
   onClose,
 }: Props) {
   if (!block || !trackId) {
@@ -212,9 +219,35 @@ export function Inspector({
 
       <div className="flex flex-col gap-1">
         <span className="font-mono text-[9px] text-slate-600">DEPS (DAG)</span>
-        <div className="rounded-md border border-[#1e293b] bg-[#060c1a] px-2 py-1 font-mono text-[10px] text-slate-500">
-          {block.deps.length === 0 ? '(none)' : block.deps.join(', ')}
-        </div>
+        {block.deps.length === 0 ? (
+          <div className="rounded-md border border-[#1e293b] bg-[#060c1a] px-2 py-1 font-mono text-[10px] text-slate-700">
+            (none)
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {block.deps.map((d) => (
+              <span
+                key={d}
+                className="inline-flex items-center gap-1 rounded border border-[#1e293b] bg-[#060c1a] px-1.5 py-0.5 font-mono text-[9px] text-slate-400"
+              >
+                {resolveDepLabel(d)}
+                <button
+                  type="button"
+                  onClick={() => onRemoveDep(trackId, block.id, d)}
+                  className="text-slate-600 hover:text-red-500"
+                  title="依存を削除"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <span className="font-mono text-[8px] leading-relaxed text-slate-700">
+          {linkMode
+            ? '依存リンクモード: 他のブロックをクリックして追加'
+            : 'ツールバーの「依存リンク」モードで追加'}
+        </span>
       </div>
 
       <div className="mt-auto font-mono text-[9px] text-slate-700">

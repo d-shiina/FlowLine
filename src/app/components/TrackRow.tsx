@@ -11,6 +11,8 @@ interface Props {
   totalSlots: number;
   playheadSlot: number;
   selectedBlockId: string | null;
+  linkSourceBlockId: string | null;
+  blocksDraggable: boolean;
   variant?: Variant;
   subroutines: Subroutine[];
   onRename: (id: string, name: string) => void;
@@ -30,6 +32,8 @@ export function TrackRow({
   totalSlots,
   playheadSlot,
   selectedBlockId,
+  linkSourceBlockId,
+  blocksDraggable,
   variant = 'normal',
   subroutines,
   onRename,
@@ -175,6 +179,8 @@ export function TrackRow({
               active={active}
               past={past}
               selected={selectedBlockId === b.id}
+              linkSource={linkSourceBlockId === b.id}
+              draggable={blocksDraggable}
               subroutines={subroutines}
               onSelect={onSelectBlock}
               onUpdate={onUpdateBlock}

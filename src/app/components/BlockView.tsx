@@ -8,6 +8,8 @@ interface Props {
   active: boolean;
   past: boolean;
   selected: boolean;
+  linkSource: boolean;
+  draggable: boolean;
   subroutines: Subroutine[];
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
@@ -79,6 +81,8 @@ export function BlockView({
   active,
   past,
   selected,
+  linkSource,
+  draggable,
   subroutines,
   onSelect,
   onUpdate,
@@ -100,10 +104,11 @@ export function BlockView({
   const left = block.slot * SLOT_PX + BLOCK_MARGIN;
   const width = BLOCK_W;
 
-  const handleDragStart = (e: React.MouseEvent) => {
+  const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     onSelect(trackId, block.id);
+    if (!draggable) return; // link/sync mode: select only, no drag
     const startX = e.clientX;
     const origSlot = block.slot;
     const onMove = (ev: MouseEvent) => {
@@ -123,14 +128,25 @@ export function BlockView({
 
   const badges = computeBadges(block);
 
+  const borderColor = linkSource
+    ? '#60a5fa'
+    : selected
+      ? meta.color
+      : active
+        ? meta.color
+        : past
+          ? `${meta.color}30`
+          : `${meta.color}${hov ? 'cc' : '66'}`;
+
   return (
     <div
-      className="absolute cursor-grab select-none overflow-hidden rounded-lg px-2 transition-colors"
+      className="absolute select-none overflow-hidden rounded-lg px-2 transition-colors"
       style={{
         left,
         top: 8,
         width,
         height: TRACK_H - 16,
+        cursor: draggable ? 'grab' : 'crosshair',
         background: active
           ? `${meta.color}44`
           : past
@@ -138,25 +154,19 @@ export function BlockView({
             : hov
               ? `${meta.color}28`
               : `${meta.color}18`,
-        border: `1.5px solid ${
-          selected
-            ? meta.color
-            : active
-              ? meta.color
-              : past
-                ? `${meta.color}30`
-                : `${meta.color}${hov ? 'cc' : '66'}`
-        }`,
-        boxShadow: active
-          ? `0 0 14px ${meta.color}66`
-          : selected
-            ? `0 0 0 1px ${meta.color}88`
-            : 'none',
-        zIndex: active ? 5 : selected ? 4 : 2,
+        border: `${linkSource ? 2 : 1.5}px solid ${borderColor}`,
+        boxShadow: linkSource
+          ? '0 0 12px #60a5fa88'
+          : active
+            ? `0 0 14px ${meta.color}66`
+            : selected
+              ? `0 0 0 1px ${meta.color}88`
+              : 'none',
+        zIndex: linkSource ? 6 : active ? 5 : selected ? 4 : 2,
       }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
-      onMouseDown={handleDragStart}
+      onMouseDown={handleMouseDown}
       onClick={(e) => {
         e.stopPropagation();
         onSelect(trackId, block.id);

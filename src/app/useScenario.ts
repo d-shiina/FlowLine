@@ -98,6 +98,9 @@ export interface ScenarioStore {
   ) => void;
   deleteBlock: (trackId: string, blockId: string) => void;
 
+  addDep: (trackId: string, blockId: string, depId: string) => void;
+  removeDep: (trackId: string, blockId: string, depId: string) => void;
+
   addSync: (sp: SyncPoint) => void;
   deleteSync: (id: string) => void;
 
@@ -263,6 +266,39 @@ export function useScenario(): ScenarioStore {
     [commit],
   );
 
+  const addDep = useCallback(
+    (trackId: string, blockId: string, depId: string) => {
+      if (blockId === depId) return; // no self-deps
+      commit((s) =>
+        mapTrack(s, trackId, (t) => ({
+          ...t,
+          blocks: t.blocks.map((b) => {
+            if (b.id !== blockId) return b;
+            if (b.deps.includes(depId)) return b;
+            return { ...b, deps: [...b.deps, depId] };
+          }),
+        })),
+      );
+    },
+    [commit],
+  );
+
+  const removeDep = useCallback(
+    (trackId: string, blockId: string, depId: string) => {
+      commit((s) =>
+        mapTrack(s, trackId, (t) => ({
+          ...t,
+          blocks: t.blocks.map((b) =>
+            b.id === blockId
+              ? { ...b, deps: b.deps.filter((d) => d !== depId) }
+              : b,
+          ),
+        })),
+      );
+    },
+    [commit],
+  );
+
   const addSync = useCallback(
     (sp: SyncPoint) => {
       commit((s) => ({ ...s, syncPoints: [...s.syncPoints, sp] }));
@@ -343,6 +379,8 @@ export function useScenario(): ScenarioStore {
     addBlock,
     updateBlock,
     deleteBlock,
+    addDep,
+    removeDep,
     addSync,
     deleteSync,
     addSubroutine,

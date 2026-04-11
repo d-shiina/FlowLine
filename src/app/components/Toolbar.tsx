@@ -9,9 +9,10 @@ import {
   BookOpen,
   Undo2,
   Redo2,
+  Link2,
 } from 'lucide-react';
 
-export type EditMode = 'block' | 'sync';
+export type EditMode = 'block' | 'sync' | 'link';
 
 interface Props {
   mode: EditMode;
@@ -92,7 +93,7 @@ export function Toolbar({
           <button
             type="button"
             onClick={() => onModeChange('block')}
-            className="flex items-center gap-1 border-r border-[#1e293b] px-3.5 py-1.5 font-mono text-[10px] font-bold transition-colors"
+            className="flex items-center gap-1 border-r border-[#1e293b] px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
             style={{
               background: mode === 'block' ? '#3B82F620' : 'transparent',
               color: mode === 'block' ? '#3B82F6' : '#475569',
@@ -102,8 +103,20 @@ export function Toolbar({
           </button>
           <button
             type="button"
+            onClick={() => onModeChange('link')}
+            className="flex items-center gap-1 border-r border-[#1e293b] px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
+            style={{
+              background: mode === 'link' ? '#60a5fa20' : 'transparent',
+              color: mode === 'link' ? '#60a5fa' : '#475569',
+            }}
+            title="2つのブロックをクリックして依存関係を作成"
+          >
+            <Link2 className="h-3 w-3" /> 依存リンク
+          </button>
+          <button
+            type="button"
             onClick={() => onModeChange('sync')}
-            className="flex items-center gap-1 px-3.5 py-1.5 font-mono text-[10px] font-bold transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
             style={{
               background: mode === 'sync' ? '#f43f5e20' : 'transparent',
               color: mode === 'sync' ? '#f43f5e' : '#475569',
