@@ -571,6 +571,12 @@ export default function App() {
                       store.deleteBlock(tid, bid);
                       if (selected?.blockId === bid) setSelected(null);
                     }}
+                    onMoveBlock={(fromId, bid, toId, newSlot) => {
+                      store.moveBlock(fromId, bid, toId, newSlot);
+                      if (selected?.blockId === bid) {
+                        setSelected({ trackId: toId, blockId: bid });
+                      }
+                    }}
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
                   />
@@ -625,6 +631,12 @@ export default function App() {
                   onDeleteBlock={(tid, bid) => {
                     store.deleteBlock(tid, bid);
                     if (selected?.blockId === bid) setSelected(null);
+                  }}
+                  onMoveBlock={(fromId, bid, toId, newSlot) => {
+                    store.moveBlock(fromId, bid, toId, newSlot);
+                    if (selected?.blockId === bid) {
+                      setSelected({ trackId: toId, blockId: bid });
+                    }
                   }}
                   onSelectBlock={handleBlockClick}
                   onCanvasClick={handleCanvasClick}
@@ -690,6 +702,12 @@ export default function App() {
                     onDeleteBlock={(tid, bid) => {
                       store.deleteBlock(tid, bid);
                       if (selected?.blockId === bid) setSelected(null);
+                    }}
+                    onMoveBlock={(fromId, bid, toId, newSlot) => {
+                      store.moveBlock(fromId, bid, toId, newSlot);
+                      if (selected?.blockId === bid) {
+                        setSelected({ trackId: toId, blockId: bid });
+                      }
                     }}
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}

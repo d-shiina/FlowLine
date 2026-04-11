@@ -14,6 +14,12 @@ interface Props {
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
   onDelete: (trackId: string, blockId: string) => void;
+  onMoveToContainer: (
+    fromId: string,
+    blockId: string,
+    toId: string,
+    newSlot: number,
+  ) => void;
 }
 
 interface Badge {
@@ -87,6 +93,7 @@ export function BlockView({
   onSelect,
   onUpdate,
   onDelete,
+  onMoveToContainer,
 }: Props) {
   const meta = BLOCK_META[block.type];
   const [hov, setHov] = useState(false);
@@ -111,14 +118,59 @@ export function BlockView({
     if (!draggable) return; // link/sync mode: select only, no drag
     const startX = e.clientX;
     const origSlot = block.slot;
+    // currentTrackId and lastSlot track the drag state across cross-
+    // container moves so subsequent mousemoves address the right
+    // container after a jump.
+    let currentTrackId = trackId;
+    let lastSlot = origSlot;
+
+    // Suppress hit testing on the dragged block itself so
+    // elementFromPoint can see the container underneath even when the
+    // cursor is directly over the block.
+    const node = e.currentTarget as HTMLElement;
+    const prevPointerEvents = node.style.pointerEvents;
+    node.style.pointerEvents = 'none';
+
     const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
-      const newSlot = Math.max(0, origSlot + pxToSlot(dx));
-      if (newSlot !== block.slot) {
-        onUpdate(trackId, block.id, { slot: newSlot });
+      const elem = document.elementFromPoint(ev.clientX, ev.clientY);
+      const container = elem
+        ? (elem as Element).closest<HTMLElement>('[data-container-id]')
+        : null;
+
+      let targetId = currentTrackId;
+      let newSlot = lastSlot;
+
+      if (container) {
+        targetId =
+          container.getAttribute('data-container-id') || currentTrackId;
+        const rect = container.getBoundingClientRect();
+        newSlot = Math.max(0, pxToSlot(ev.clientX - rect.left));
+      } else {
+        // Fallback: we're outside any track canvas (e.g. over the ruler
+        // or a header). Just update slot based on cursor delta.
+        const dx = ev.clientX - startX;
+        newSlot = Math.max(0, origSlot + pxToSlot(dx));
+      }
+
+      if (targetId === currentTrackId) {
+        if (newSlot !== lastSlot) {
+          onUpdate(currentTrackId, block.id, { slot: newSlot });
+          lastSlot = newSlot;
+        }
+      } else {
+        onMoveToContainer(currentTrackId, block.id, targetId, newSlot);
+        currentTrackId = targetId;
+        lastSlot = newSlot;
       }
     };
     const onUp = () => {
+      // Restore pointer events in case the node wasn't remounted
+      // (intra-track drag never swaps DOM nodes).
+      try {
+        node.style.pointerEvents = prevPointerEvents;
+      } catch {
+        /* node may be detached after a cross-container move */
+      }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };

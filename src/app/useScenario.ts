@@ -123,6 +123,17 @@ export interface ScenarioStore {
     patch: Partial<Block>,
   ) => void;
   deleteBlock: (trackId: string, blockId: string) => void;
+  /**
+   * Move a block from one container (track / errorHandler / subroutine)
+   * to another, placing it at `newSlot` with the usual make-room-at
+   * ripple on the destination. No-op if `fromId === toId`.
+   */
+  moveBlock: (
+    fromId: string,
+    blockId: string,
+    toId: string,
+    newSlot: number,
+  ) => void;
 
   addDep: (trackId: string, blockId: string, depId: string) => void;
   removeDep: (trackId: string, blockId: string, depId: string) => void;
@@ -288,6 +299,42 @@ export function useScenario(): ScenarioStore {
     [commit],
   );
 
+  const moveBlock = useCallback(
+    (fromId: string, blockId: string, toId: string, newSlot: number) => {
+      if (fromId === toId) return;
+      commit((s) => {
+        // Find the block in the source container first. If missing, this
+        // is a no-op and commit's reference equality will skip history.
+        const findIn = (blocks: Block[]) => blocks.find((b) => b.id === blockId);
+        let theBlock: Block | undefined;
+        if (fromId === ERROR_HANDLER_ID) {
+          theBlock = findIn(s.errorHandler.blocks);
+        } else {
+          const t = s.tracks.find((x) => x.id === fromId);
+          if (t) {
+            theBlock = findIn(t.blocks);
+          } else {
+            const sub = s.subroutines.find((x) => x.id === fromId);
+            if (sub) theBlock = findIn(sub.blocks);
+          }
+        }
+        if (!theBlock) return s;
+
+        // Remove from source
+        const removed = mapContainerBlocks(s, fromId, (blocks) =>
+          blocks.filter((b) => b.id !== blockId),
+        );
+        // Insert at destination with make-room-at ripple
+        const newBlock: Block = { ...theBlock, slot: newSlot };
+        return mapContainerBlocks(removed, toId, (blocks) => {
+          const withRoom = makeRoomAt(blocks, newSlot);
+          return [...withRoom, newBlock];
+        });
+      });
+    },
+    [commit],
+  );
+
   const addDep = useCallback(
     (containerId: string, blockId: string, depId: string) => {
       if (blockId === depId) return; // no self-deps
@@ -399,6 +446,7 @@ export function useScenario(): ScenarioStore {
     addBlock,
     updateBlock,
     deleteBlock,
+    moveBlock,
     addDep,
     removeDep,
     addSync,

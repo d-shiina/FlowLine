@@ -23,6 +23,12 @@ interface Props {
     patch: Partial<Block>,
   ) => void;
   onDeleteBlock: (trackId: string, blockId: string) => void;
+  onMoveBlock: (
+    fromId: string,
+    blockId: string,
+    toId: string,
+    newSlot: number,
+  ) => void;
   onSelectBlock: (trackId: string, blockId: string) => void;
   onCanvasClick: (trackId: string, slot: number) => void;
 }
@@ -40,6 +46,7 @@ export function TrackRow({
   onDelete,
   onUpdateBlock,
   onDeleteBlock,
+  onMoveBlock,
   onSelectBlock,
   onCanvasClick,
 }: Props) {
@@ -138,6 +145,7 @@ export function TrackRow({
 
       {/* canvas */}
       <div
+        data-container-id={track.id}
         className="relative"
         style={{
           width: totalSlots * SLOT_PX,
@@ -185,6 +193,7 @@ export function TrackRow({
               onSelect={onSelectBlock}
               onUpdate={onUpdateBlock}
               onDelete={onDeleteBlock}
+              onMoveToContainer={onMoveBlock}
             />
           );
         })}
