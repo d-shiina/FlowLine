@@ -7,6 +7,7 @@ import {
   Sun,
   Moon,
   Terminal,
+  Variable,
 } from 'lucide-react';
 import type { Theme } from '../useTheme';
 
@@ -18,6 +19,9 @@ interface Props {
   onImport: () => void;
   onExport: () => void;
   onSample: () => void;
+  onOpenVariables: () => void;
+  /** Number of scenario-scope variables, shown as a badge on the chip. */
+  variableCount: number;
   scenarioName: string;
   onRenameScenario: (name: string) => void;
   theme: Theme;
@@ -38,6 +42,8 @@ export function Toolbar({
   onImport,
   onExport,
   onSample,
+  onOpenVariables,
+  variableCount,
   scenarioName,
   onRenameScenario,
   theme,
@@ -76,6 +82,20 @@ export function Toolbar({
           title="サンプルシナリオを読込"
         >
           <BookOpen className="h-3 w-3" /> サンプル
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenVariables}
+          className={chipBase}
+          title="シナリオ変数を編集"
+        >
+          <Variable className="h-3 w-3" /> 変数
+          {variableCount > 0 && (
+            <span className="ml-0.5 rounded bg-fl-border-strong px-1 text-[9px] text-fl-text-dim">
+              {variableCount}
+            </span>
+          )}
         </button>
 
         <button

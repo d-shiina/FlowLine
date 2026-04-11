@@ -112,6 +112,16 @@ export interface ScenarioStore {
 
   renameScenario: (name: string) => void;
 
+  /**
+   * Scenario-variable helpers. ``key`` is the flat key under
+   * ``scenario.variables.scenario`` — do NOT include the ``scenario.``
+   * prefix, runtimes add that when binding. ``value`` can be any JSON
+   * primitive or object; nodes read whatever type they declared.
+   */
+  setVariable: (key: string, value: unknown) => void;
+  renameVariable: (oldKey: string, newKey: string) => void;
+  deleteVariable: (key: string) => void;
+
   addTrack: () => void;
   deleteTrack: (id: string) => void;
   renameTrack: (id: string, name: string) => void;
@@ -203,6 +213,48 @@ export function useScenario(): ScenarioStore {
   const renameScenario = useCallback(
     (name: string) => {
       commit((s) => (s.name === name ? s : { ...s, name }));
+    },
+    [commit],
+  );
+
+  const setVariable = useCallback(
+    (key: string, value: unknown) => {
+      commit((s) => {
+        const next = { ...s.variables.scenario, [key]: value };
+        return { ...s, variables: { ...s.variables, scenario: next } };
+      });
+    },
+    [commit],
+  );
+
+  const renameVariable = useCallback(
+    (oldKey: string, newKey: string) => {
+      const trimmed = newKey.trim();
+      if (!trimmed || oldKey === trimmed) return;
+      commit((s) => {
+        const cur = s.variables.scenario;
+        if (!(oldKey in cur)) return s;
+        if (trimmed in cur) return s; // collision — ignore
+        const { [oldKey]: value, ...rest } = cur;
+        return {
+          ...s,
+          variables: { ...s.variables, scenario: { ...rest, [trimmed]: value } },
+        };
+      });
+    },
+    [commit],
+  );
+
+  const deleteVariable = useCallback(
+    (key: string) => {
+      commit((s) => {
+        if (!(key in s.variables.scenario)) return s;
+        const rest: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(s.variables.scenario)) {
+          if (k !== key) rest[k] = v;
+        }
+        return { ...s, variables: { ...s.variables, scenario: rest } };
+      });
     },
     [commit],
   );
@@ -393,6 +445,9 @@ export function useScenario(): ScenarioStore {
     undo,
     redo,
     renameScenario,
+    setVariable,
+    renameVariable,
+    deleteVariable,
     addTrack,
     deleteTrack,
     renameTrack,
