@@ -53,8 +53,8 @@ export function Inspector({
 }: Props) {
   if (!block || !trackId) {
     return (
-      <aside className="flex h-full w-72 flex-shrink-0 flex-col border-l border-[#0f172a] bg-[#0a1020] p-4">
-        <div className="font-mono text-[10px] text-slate-600">
+      <aside className="flex h-full w-72 flex-shrink-0 flex-col border-l border-fl-border bg-fl-panel p-4">
+        <div className="font-mono text-[10px] text-fl-text-faint">
           ブロックを選択してプロパティを編集
         </div>
       </aside>
@@ -83,7 +83,7 @@ export function Inspector({
   ];
 
   return (
-    <aside className="flex h-full w-72 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-[#0f172a] bg-[#0a1020] p-4">
+    <aside className="fl-scroll flex h-full w-72 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-fl-border bg-fl-panel p-4">
       <div className="flex items-center justify-between">
         <div
           className="font-mono text-[10px] font-bold tracking-wider"
@@ -97,25 +97,25 @@ export function Inspector({
         <button
           type="button"
           onClick={onClose}
-          className="font-mono text-[10px] text-slate-600 hover:text-slate-400"
+          className="font-mono text-[10px] text-fl-text-faint hover:text-fl-text"
         >
           ×
         </button>
       </div>
 
       <label className="flex flex-col gap-1">
-        <span className="font-mono text-[9px] text-slate-600">LABEL</span>
+        <span className="font-mono text-[9px] text-fl-text-faint">LABEL</span>
         <input
           value={block.label}
           onChange={(e) =>
             onChange(trackId, block.id, { label: e.target.value })
           }
-          className="rounded-md border border-[#334155] bg-[#0f172a] px-2 py-1 font-mono text-[11px] text-slate-200 outline-none"
+          className="rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none"
         />
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="font-mono text-[9px] text-slate-600">SLOT</span>
+        <span className="font-mono text-[9px] text-fl-text-faint">SLOT</span>
         <input
           type="number"
           min={0}
@@ -125,12 +125,12 @@ export function Inspector({
               slot: Math.max(0, Number(e.target.value)),
             })
           }
-          className="rounded-md border border-[#334155] bg-[#0f172a] px-2 py-1 font-mono text-[11px] text-slate-200 outline-none"
+          className="rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none"
         />
       </label>
 
       <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2 font-mono text-[10px] text-slate-400">
+        <div className="flex items-center gap-2 font-mono text-[10px] text-fl-text-muted">
           <Checkbox
             checked={!!block.skipIfMissing}
             onCheckedChange={(v) =>
@@ -142,15 +142,15 @@ export function Inspector({
           />
           ターゲットが見つからなくてもOK
         </div>
-        <span className="pl-5 font-mono text-[9px] text-slate-700">
+        <span className="pl-5 font-mono text-[9px] text-fl-text-ghost">
           （想定内の不在は静かにスキップ）
         </span>
       </div>
 
       <div className="flex flex-col gap-1">
-        <div className="flex items-center justify-between font-mono text-[9px] text-slate-600">
+        <div className="flex items-center justify-between font-mono text-[9px] text-fl-text-faint">
           <span>TIMEOUT (秒)</span>
-          <div className="flex items-center gap-1 text-[9px] text-slate-500">
+          <div className="flex items-center gap-1 text-[9px] text-fl-text-dim">
             <Checkbox
               checked={hasTimeout}
               onCheckedChange={(v) =>
@@ -176,12 +176,12 @@ export function Inspector({
                 : undefined,
             })
           }
-          className="rounded-md border border-[#334155] bg-[#0f172a] px-2 py-1 font-mono text-[11px] text-slate-200 outline-none disabled:opacity-40"
+          className="rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none disabled:opacity-40"
         />
       </div>
 
       <div className="flex flex-col gap-1">
-        <span className="font-mono text-[9px] text-slate-600">ON ERROR</span>
+        <span className="font-mono text-[9px] text-fl-text-faint">ON ERROR</span>
         <Select<OnErrorKey>
           value={onErrorKey}
           onValueChange={(k) =>
@@ -197,7 +197,7 @@ export function Inspector({
           </span>
         )}
         {onErrorKey === 'retry' && typeof block.onError === 'object' && (
-          <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-slate-500">
+          <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-fl-text-dim">
             <input
               type="number"
               min={1}
@@ -211,7 +211,7 @@ export function Inspector({
                   },
                 })
               }
-              className="w-12 rounded border border-[#334155] bg-[#0f172a] px-1 py-0.5 text-center font-mono text-[10px] text-slate-200 outline-none"
+              className="w-12 rounded border border-fl-border-strong bg-fl-panel-2 px-1 py-0.5 text-center font-mono text-[10px] text-fl-text outline-none"
             />
             回 →
             <div className="flex-1">
@@ -233,9 +233,9 @@ export function Inspector({
       </div>
 
       <div className="flex flex-col gap-1">
-        <span className="font-mono text-[9px] text-slate-600">DEPS (DAG)</span>
+        <span className="font-mono text-[9px] text-fl-text-faint">DEPS (DAG)</span>
         {block.deps.length === 0 ? (
-          <div className="rounded-md border border-[#1e293b] bg-[#060c1a] px-2 py-1 font-mono text-[10px] text-slate-700">
+          <div className="rounded-md border border-fl-border-2 bg-fl-bg px-2 py-1 font-mono text-[10px] text-fl-text-ghost">
             (none)
           </div>
         ) : (
@@ -243,13 +243,13 @@ export function Inspector({
             {block.deps.map((d) => (
               <span
                 key={d}
-                className="inline-flex items-center gap-1 rounded border border-[#1e293b] bg-[#060c1a] px-1.5 py-0.5 font-mono text-[9px] text-slate-400"
+                className="inline-flex items-center gap-1 rounded border border-fl-border-2 bg-fl-bg px-1.5 py-0.5 font-mono text-[9px] text-fl-text-muted"
               >
                 {resolveDepLabel(d)}
                 <button
                   type="button"
                   onClick={() => onRemoveDep(trackId, block.id, d)}
-                  className="text-slate-600 hover:text-red-500"
+                  className="text-fl-text-faint hover:text-red-500"
                   title="依存を削除"
                 >
                   ×
@@ -258,14 +258,14 @@ export function Inspector({
             ))}
           </div>
         )}
-        <span className="font-mono text-[8px] leading-relaxed text-slate-700">
+        <span className="font-mono text-[8px] leading-relaxed text-fl-text-ghost">
           {linkMode
             ? '依存リンクモード: 他のブロックをクリックして追加'
             : 'ツールバーの「依存リンク」モードで追加'}
         </span>
       </div>
 
-      <div className="mt-auto font-mono text-[9px] text-slate-700">
+      <div className="mt-auto font-mono text-[9px] text-fl-text-ghost">
         id: {block.id}
       </div>
     </aside>

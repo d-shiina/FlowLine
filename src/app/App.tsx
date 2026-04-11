@@ -8,6 +8,7 @@ import {
   TRACK_H,
 } from './layout';
 import { useScenario, uid } from './useScenario';
+import { useTheme } from './useTheme';
 import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Toolbar, type EditMode } from './components/Toolbar';
@@ -34,6 +35,7 @@ type EditorMode =
 export default function App() {
   const store = useScenario();
   const { scenario } = store;
+  const { theme, toggle: toggleTheme } = useTheme();
 
   // ─── editor mode (scenario vs subroutine) ──────────────────────────
   const [editorMode, setEditorMode] = useState<EditorMode>({
@@ -422,7 +424,7 @@ export default function App() {
   const regularTrackHeight = scenario.tracks.length * TRACK_H;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#060c1a] font-mono text-slate-200">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-fl-bg font-mono text-fl-text">
       <Toolbar
         mode={mode}
         onModeChange={setMode}
@@ -438,6 +440,8 @@ export default function App() {
         canRedo={store.canRedo}
         onUndo={store.undo}
         onRedo={store.redo}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       <input
@@ -448,9 +452,9 @@ export default function App() {
         className="hidden"
       />
 
-      <div className="flex flex-shrink-0 gap-5 border-b border-[#0f172a] bg-[#0a1020] px-5 py-1.5">
+      <div className="flex flex-shrink-0 gap-5 border-b border-fl-border bg-fl-panel px-5 py-1.5">
         {mode === 'block' && (
-          <div className="text-[9px] text-[#3B82F6]">
+          <div className="text-[9px] text-[#3b82f6]">
             ▶ キャンバスをクリックしてブロック配置
           </div>
         )}
@@ -466,7 +470,7 @@ export default function App() {
             ⬡ キャンバスをクリックして同期ポイント配置
           </div>
         )}
-        <div className="ml-auto text-[9px] text-[#1e293b]">
+        <div className="ml-auto text-[9px] text-fl-text-ghost">
           ブロックドラッグ=スロット移動 / Ctrl+Z=元に戻す / Del=削除
         </div>
       </div>
@@ -502,7 +506,7 @@ export default function App() {
         />
         <div className="fl-scroll min-h-0 flex-1 overflow-auto">
           {editorMode.type === 'subroutine' && subroutineTrack && (
-            <div className="flex items-center gap-2 border-b border-[#0f172a] bg-[#0a1320] px-4 py-2">
+            <div className="flex items-center gap-2 border-b border-fl-border bg-fl-panel px-4 py-2">
               <button
                 type="button"
                 onClick={() => {
@@ -510,11 +514,11 @@ export default function App() {
                   setSelected(null);
                   setLinkSource(null);
                 }}
-                className="font-mono text-[10px] text-slate-500 transition-colors hover:text-slate-300"
+                className="font-mono text-[10px] text-fl-text-dim transition-colors hover:text-fl-text"
               >
                 シナリオ
               </button>
-              <span className="font-mono text-[10px] text-slate-700">/</span>
+              <span className="font-mono text-[10px] text-fl-text-ghost">/</span>
               <div className="font-mono text-[11px] font-bold text-[#60a5fa]">
                 ⎔ {subroutineTrack.name}
               </div>
@@ -525,7 +529,7 @@ export default function App() {
                   setSelected(null);
                   setLinkSource(null);
                 }}
-                className="ml-auto flex items-center gap-1 rounded-md border border-[#334155] bg-[#0f172a] px-2 py-0.5 font-mono text-[9px] text-slate-400 transition-colors hover:border-[#475569] hover:text-slate-200"
+                className="ml-auto flex items-center gap-1 rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-0.5 font-mono text-[9px] text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text"
                 title="シナリオビューに戻る"
               >
                 × 閉じる
@@ -537,7 +541,7 @@ export default function App() {
             {/* Ruler row */}
             <div className="flex">
               <div
-                className="flex-shrink-0 border-b border-r border-[#0f172a] bg-[#0a1020]"
+                className="flex-shrink-0 border-b border-r border-fl-border bg-fl-panel"
                 style={{ width: HEADER_W, height: RULER_H, borderRightWidth: 3 }}
               />
               <div className="relative flex-1 overflow-hidden">
@@ -574,31 +578,31 @@ export default function App() {
                 <button
                   type="button"
                   onClick={store.addTrack}
-                  className="flex h-9 w-full cursor-pointer border-b border-dashed border-[#0f172a] text-left"
+                  className="flex h-9 w-full cursor-pointer border-b border-dashed border-fl-border text-left"
                 >
                   <div
-                    className="flex flex-shrink-0 items-center bg-[#0a1020] px-3"
+                    className="flex flex-shrink-0 items-center bg-fl-panel px-3"
                     style={{
                       width: HEADER_W,
-                      borderRight: '3px solid #0f172a',
+                      borderRight: '3px solid var(--fl-border)',
                     }}
                   >
-                    <span className="text-[9px] text-[#1e293b]">
+                    <span className="text-[9px] text-fl-text-ghost">
                       + トラック追加
                     </span>
                   </div>
-                  <div className="flex-1 bg-[#060c1a]" />
+                  <div className="flex-1 bg-fl-bg" />
                 </button>
 
                 {/* Error handler separator */}
                 <div
-                  className="flex items-center border-t border-b border-[#f43f5e33] bg-[#0a0608] px-3"
+                  className="flex items-center border-t border-b border-[#f43f5e33] bg-fl-error-panel px-3"
                   style={{ height: ERROR_DIVIDER_H }}
                 >
-                  <span className="font-mono text-[9px] tracking-wider text-[#f43f5e99]">
+                  <span className="font-mono text-[9px] tracking-wider text-[#f43f5e]">
                     ⚠ SCENARIO ERROR HANDLER
                   </span>
-                  <span className="ml-3 font-mono text-[8px] text-[#f43f5e55]">
+                  <span className="ml-3 font-mono text-[8px] text-[#f43f5e99]">
                     abort 発火時にのみ実行されるクリーンアップトラック
                   </span>
                 </div>
@@ -729,18 +733,18 @@ export default function App() {
       </div>
 
       {/* Footer legend */}
-      <div className="flex flex-shrink-0 flex-wrap gap-6 border-t border-[#0f172a] bg-[#0a1020] px-5 py-1.5">
+      <div className="flex flex-shrink-0 flex-wrap gap-6 border-t border-fl-border bg-fl-panel px-5 py-1.5">
         {(
           [
-            ['▣', '#3B82F6', '1 ブロック = 1 slot'],
+            ['▣', '#3b82f6', '1 ブロック = 1 slot'],
             ['⬡', '#f43f5e', '同期ポイント = DAG 合流'],
             ['?', '#eab308', 'バッジ = 非デフォルト属性'],
-            ['⚡', '#22C55E', 'トラックは並列実行'],
+            ['⚡', '#22c55e', 'トラックは並列実行'],
           ] as const
         ).map(([icon, color, text]) => (
           <div
             key={text}
-            className="flex items-center gap-1.5 text-[9px] text-[#334155]"
+            className="flex items-center gap-1.5 text-[9px] text-fl-text-faint"
           >
             <span style={{ color }}>{icon}</span>
             {text}

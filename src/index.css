@@ -1,23 +1,87 @@
 @import 'tailwindcss';
 
+/*
+ * FLOWLINE theme tokens.
+ *
+ * Semantic tokens live on :root (dark default) and [data-theme="light"]
+ * (light override). The @theme directive re-exports them as Tailwind
+ * utility tokens (bg-fl-bg, text-fl-text, etc.), which means switching
+ * the data-theme attribute on <html> swaps the whole theme at runtime
+ * with no JS re-render required.
+ *
+ * Accent colors and block-type colors are fixed across themes — they're
+ * semantic (action=blue, loop=purple, etc.) and work on both backdrops.
+ */
+
 @theme {
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', ui-monospace, monospace;
 
-  /* FLOWLINE palette */
-  --color-fl-bg: #060c1a;
-  --color-fl-panel: #0a1020;
-  --color-fl-border: #0f172a;
-  --color-fl-rail: #1e293b;
-  --color-fl-muted: #334155;
+  /* Theme-swapped tokens */
+  --color-fl-bg: var(--fl-bg);
+  --color-fl-panel: var(--fl-panel);
+  --color-fl-panel-2: var(--fl-panel-2);
+  --color-fl-modal: var(--fl-modal);
+  --color-fl-border: var(--fl-border);
+  --color-fl-border-2: var(--fl-border-2);
+  --color-fl-border-strong: var(--fl-border-strong);
+  --color-fl-text: var(--fl-text);
+  --color-fl-text-muted: var(--fl-text-muted);
+  --color-fl-text-dim: var(--fl-text-dim);
+  --color-fl-text-faint: var(--fl-text-faint);
+  --color-fl-text-ghost: var(--fl-text-ghost);
+  --color-fl-error-panel: var(--fl-error-panel);
+  --color-fl-error-canvas: var(--fl-error-canvas);
 
-  /* block type colors */
+  /* Fixed accents */
+  --color-fl-accent: #3b82f6;
+  --color-fl-link: #60a5fa;
+  --color-fl-play: #22c55e;
+  --color-fl-error: #f43f5e;
+  --color-fl-warn: #eab308;
+
+  /* Block type colors (fixed) */
   --color-fl-action: #3b82f6;
   --color-fl-wait: #06b6d4;
   --color-fl-loop: #8b5cf6;
   --color-fl-branch: #f59e0b;
-  --color-fl-sync: #f43f5e;
   --color-fl-sub: #94a3b8;
-  --color-fl-play: #22c55e;
+}
+
+:root,
+[data-theme='dark'] {
+  /* Dark theme — lifted noticeably from the original near-black palette
+     so text stays legible without losing the dark aesthetic. */
+  --fl-bg: #0b1220;
+  --fl-panel: #111827;
+  --fl-panel-2: #1e293b;
+  --fl-modal: #1e293b;
+  --fl-border: #1e293b;
+  --fl-border-2: #334155;
+  --fl-border-strong: #475569;
+  --fl-text: #f1f5f9;
+  --fl-text-muted: #e2e8f0;
+  --fl-text-dim: #cbd5e1;
+  --fl-text-faint: #94a3b8;
+  --fl-text-ghost: #475569;
+  --fl-error-panel: #1d0c10;
+  --fl-error-canvas: #14060a;
+}
+
+[data-theme='light'] {
+  --fl-bg: #f8fafc;
+  --fl-panel: #ffffff;
+  --fl-panel-2: #f1f5f9;
+  --fl-modal: #ffffff;
+  --fl-border: #e2e8f0;
+  --fl-border-2: #cbd5e1;
+  --fl-border-strong: #94a3b8;
+  --fl-text: #0f172a;
+  --fl-text-muted: #1e293b;
+  --fl-text-dim: #475569;
+  --fl-text-faint: #64748b;
+  --fl-text-ghost: #cbd5e1;
+  --fl-error-panel: #fef2f2;
+  --fl-error-canvas: #fff7f7;
 }
 
 html,
@@ -29,24 +93,23 @@ body,
 }
 
 body {
-  background: var(--color-fl-bg);
-  color: #e2e8f0;
+  background: var(--fl-bg);
+  color: var(--fl-text);
   font-family: var(--font-mono);
   overflow: hidden;
 }
 
-/* hide scrollbar chrome but keep scrolling */
 .fl-scroll::-webkit-scrollbar {
   height: 10px;
   width: 10px;
 }
 .fl-scroll::-webkit-scrollbar-track {
-  background: #0a1020;
+  background: var(--fl-panel);
 }
 .fl-scroll::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: var(--fl-border-2);
   border-radius: 6px;
 }
 .fl-scroll::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: var(--fl-border-strong);
 }

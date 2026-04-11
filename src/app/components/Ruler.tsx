@@ -12,7 +12,7 @@ export function Ruler({ totalSlots, playheadSlot }: Props) {
   const ticks = Array.from({ length: totalSlots + 1 }, (_, i) => i);
   return (
     <div
-      className="relative select-none border-b border-[#0f172a] bg-[#0a1020]"
+      className="relative select-none border-b border-fl-border bg-fl-panel"
       style={{ height: RULER_H }}
     >
       {ticks.map((t) => {
@@ -27,12 +27,14 @@ export function Ruler({ totalSlots, playheadSlot }: Props) {
               className="mt-auto w-px"
               style={{
                 height: major ? 12 : 6,
-                background: major ? '#334155' : '#1e293b',
+                background: major
+                  ? 'var(--fl-border-strong)'
+                  : 'var(--fl-border-2)',
               }}
             />
             {major && (
               <div
-                className="absolute top-1 -translate-x-1/2 font-mono text-[9px] text-slate-600"
+                className="absolute top-1 -translate-x-1/2 font-mono text-[9px] text-fl-text-faint"
                 style={{ top: 4 }}
               >
                 #{t}
@@ -43,7 +45,7 @@ export function Ruler({ totalSlots, playheadSlot }: Props) {
       })}
       {playheadSlot >= 0 && (
         <div
-          className="pointer-events-none absolute top-0 h-full w-px bg-[color:var(--color-fl-play)]"
+          className="pointer-events-none absolute top-0 h-full w-px bg-[#22c55e]"
           style={{ left: playheadSlot * SLOT_PX }}
         />
       )}

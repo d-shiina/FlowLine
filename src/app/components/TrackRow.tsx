@@ -61,7 +61,7 @@ export function TrackRow({
 
   return (
     <div
-      className="flex border-b border-[#0a0f1e]"
+      className="flex border-b border-fl-border"
       style={{ height: TRACK_H }}
     >
       {/* header */}
@@ -69,7 +69,7 @@ export function TrackRow({
         className="flex flex-shrink-0 flex-col justify-between px-3 py-2"
         style={{
           width: HEADER_W,
-          background: isError ? '#18090d' : '#0a1020',
+          background: isError ? 'var(--fl-error-panel)' : 'var(--fl-panel)',
           borderRight: `${isError ? 4 : 3}px solid ${track.color}`,
         }}
       >
@@ -95,7 +95,7 @@ export function TrackRow({
                 setRenaming(false);
               }
             }}
-            className="w-full rounded border bg-[#1e293b] px-1.5 py-0.5 font-mono text-[11px] text-slate-200 outline-none"
+            className="w-full rounded border bg-fl-panel-2 px-1.5 py-0.5 font-mono text-[11px] text-fl-text outline-none"
             style={{ borderColor: track.color }}
           />
         ) : (
@@ -117,7 +117,7 @@ export function TrackRow({
                 ? track.blocks.length === 0
                   ? '#f43f5e88'
                   : '#f43f5ecc'
-                : '#64748b',
+                : 'var(--fl-text-faint)',
             }}
           >
             {isError && track.blocks.length === 0
@@ -128,7 +128,7 @@ export function TrackRow({
             <button
               type="button"
               onClick={() => onDelete(track.id)}
-              className="font-mono text-[9px] text-slate-600 transition-colors hover:text-red-500"
+              className="font-mono text-[9px] text-fl-text-faint transition-colors hover:text-red-500"
             >
               × 削除
             </button>
@@ -141,7 +141,7 @@ export function TrackRow({
         className="relative"
         style={{
           width: totalSlots * SLOT_PX,
-          background: isError ? '#0a0406' : '#060c1a',
+          background: isError ? 'var(--fl-error-canvas)' : 'var(--fl-bg)',
           cursor: 'cell',
         }}
         onClick={handleCanvasClick}
@@ -156,14 +156,14 @@ export function TrackRow({
             className="pointer-events-none absolute top-0 h-full w-px"
             style={{
               left: t * SLOT_PX,
-              background: isError ? '#1a0609' : '#0f172a',
+              background: isError ? '#f43f5e22' : 'var(--fl-border)',
             }}
           />
         ))}
 
         {/* empty hint for error handler */}
         {isError && track.blocks.length === 0 && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[10px] text-[#f43f5e55]">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center font-mono text-[10px] text-[#f43f5e88]">
             + エラー時のクリーンアップ・通知を配置（クリック）
           </div>
         )}

@@ -12,13 +12,9 @@ interface Props {
 }
 
 /**
- * Left sidebar listing subroutine definitions. Subroutines are reusable
- * block sequences that can be called from any track via a `subroutine`
- * block (see Inspector / AddBlockModal for the call site).
- *
- * For Phase 1 we show the list, let users create/rename/delete entries,
- * and track how many blocks each one contains. The in-place subroutine
- * editor (editing the blocks inside a subroutine) is a future feature.
+ * Left sidebar listing subroutine definitions. Clicking a subroutine
+ * opens the internal editor, which swaps the main canvas for that
+ * subroutine's single-track view.
  */
 export function SubroutineSidebar({
   subroutines,
@@ -46,9 +42,9 @@ export function SubroutineSidebar({
   };
 
   return (
-    <aside className="fl-scroll flex h-full w-56 flex-shrink-0 flex-col gap-2 overflow-y-auto border-r border-[#0f172a] bg-[#0a1020] p-3">
+    <aside className="fl-scroll flex h-full w-56 flex-shrink-0 flex-col gap-2 overflow-y-auto border-r border-fl-border bg-fl-panel p-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1 font-mono text-[10px] font-bold tracking-wider text-[#94a3b8]">
+        <div className="flex items-center gap-1 font-mono text-[10px] font-bold tracking-wider text-fl-text-dim">
           <BoxIcon className="h-3 w-3" />
           サブルーチン
         </div>
@@ -58,7 +54,7 @@ export function SubroutineSidebar({
             setCreating(true);
             setDraft('');
           }}
-          className="flex h-4 w-4 items-center justify-center rounded border border-[#334155] text-slate-500 transition-colors hover:border-[#94a3b8] hover:text-[#94a3b8]"
+          className="flex h-4 w-4 items-center justify-center rounded border border-fl-border-strong text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text"
           title="新規サブルーチン"
         >
           <Plus className="h-2.5 w-2.5" />
@@ -66,7 +62,7 @@ export function SubroutineSidebar({
       </div>
 
       {subroutines.length === 0 && !creating && (
-        <div className="rounded-md border border-dashed border-[#1e293b] p-3 text-center font-mono text-[9px] leading-relaxed text-slate-700">
+        <div className="rounded-md border border-dashed border-fl-border-2 p-3 text-center font-mono text-[9px] leading-relaxed text-fl-text-ghost">
           未定義
           <br />+ で作成
         </div>
@@ -80,8 +76,8 @@ export function SubroutineSidebar({
               key={sub.id}
               className="group flex items-center gap-1 rounded-md border px-2 py-1.5 transition-colors"
               style={{
-                borderColor: active ? '#60a5fa' : '#1e293b',
-                background: active ? '#60a5fa10' : '#0f172a',
+                borderColor: active ? '#60a5fa' : 'var(--fl-border-2)',
+                background: active ? '#60a5fa18' : 'var(--fl-panel-2)',
               }}
             >
               {editingId === sub.id ? (
@@ -94,7 +90,7 @@ export function SubroutineSidebar({
                     if (e.key === 'Enter') commitRename(sub.id);
                     if (e.key === 'Escape') setEditingId(null);
                   }}
-                  className="flex-1 bg-transparent font-mono text-[10px] text-slate-200 outline-none"
+                  className="flex-1 bg-transparent font-mono text-[10px] text-fl-text outline-none"
                 />
               ) : (
                 <button
@@ -104,14 +100,16 @@ export function SubroutineSidebar({
                     setEditingId(sub.id);
                     setEditVal(sub.name);
                   }}
-                  className="flex-1 truncate text-left font-mono text-[10px] hover:text-slate-100"
-                  style={{ color: active ? '#60a5fa' : '#cbd5e1' }}
+                  className="flex-1 truncate text-left font-mono text-[10px]"
+                  style={{
+                    color: active ? '#60a5fa' : 'var(--fl-text-muted)',
+                  }}
                   title="クリックで開く / ダブルクリックで名前変更"
                 >
                   {sub.name}
                 </button>
               )}
-              <span className="font-mono text-[8px] text-slate-600">
+              <span className="font-mono text-[8px] text-fl-text-faint">
                 {sub.blocks.length}
               </span>
               <button
@@ -123,7 +121,7 @@ export function SubroutineSidebar({
                 className="opacity-0 transition-opacity group-hover:opacity-100"
                 title="名前変更"
               >
-                <PencilLine className="h-2.5 w-2.5 text-slate-600 hover:text-slate-300" />
+                <PencilLine className="h-2.5 w-2.5 text-fl-text-faint hover:text-fl-text" />
               </button>
               <button
                 type="button"
@@ -131,14 +129,14 @@ export function SubroutineSidebar({
                 className="opacity-0 transition-opacity group-hover:opacity-100"
                 title="削除"
               >
-                <Trash2 className="h-2.5 w-2.5 text-slate-600 hover:text-red-500" />
+                <Trash2 className="h-2.5 w-2.5 text-fl-text-faint hover:text-red-500" />
               </button>
             </div>
           );
         })}
 
         {creating && (
-          <div className="flex items-center gap-1 rounded-md border border-[#3B82F6] bg-[#0f172a] px-2 py-1.5">
+          <div className="flex items-center gap-1 rounded-md border border-[#3b82f6] bg-fl-panel-2 px-2 py-1.5">
             <input
               autoFocus
               value={draft}
@@ -152,13 +150,13 @@ export function SubroutineSidebar({
                 }
               }}
               placeholder="サブルーチン名"
-              className="flex-1 bg-transparent font-mono text-[10px] text-slate-200 placeholder-slate-700 outline-none"
+              className="flex-1 bg-transparent font-mono text-[10px] text-fl-text placeholder:text-fl-text-ghost outline-none"
             />
           </div>
         )}
       </div>
 
-      <div className="mt-auto font-mono text-[8px] leading-relaxed text-slate-700">
+      <div className="mt-auto font-mono text-[8px] leading-relaxed text-fl-text-ghost">
         クリックで内部エディタを開き、
         <br />
         サブルーチンのブロックを編集できます

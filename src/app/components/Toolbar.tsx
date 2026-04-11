@@ -10,7 +10,10 @@ import {
   Undo2,
   Redo2,
   Link2,
+  Sun,
+  Moon,
 } from 'lucide-react';
+import type { Theme } from '../useTheme';
 
 export type EditMode = 'block' | 'sync' | 'link';
 
@@ -29,6 +32,8 @@ interface Props {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
 }
 
 export function Toolbar({
@@ -46,34 +51,39 @@ export function Toolbar({
   canRedo,
   onUndo,
   onRedo,
+  theme,
+  onToggleTheme,
 }: Props) {
+  const chipBase =
+    'flex items-center gap-1 rounded-lg border-[1.5px] border-fl-border-strong bg-fl-panel-2 px-3 py-1.5 font-mono text-[10px] font-bold text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text';
+
   return (
-    <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-[#0f172a] bg-[#0a1020] px-5 py-3">
+    <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-fl-border bg-fl-panel px-5 py-3">
       <div className="flex min-w-0 items-center gap-2.5">
         <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] text-[13px]">
           <Play className="h-3.5 w-3.5 fill-white stroke-white" />
         </div>
         <div className="flex min-w-0 flex-col">
-          <div className="text-[13px] font-bold tracking-wider text-slate-100">
+          <div className="text-[13px] font-bold tracking-wider text-fl-text">
             FLOWLINE
           </div>
           <input
             value={scenarioName}
             onChange={(e) => onRenameScenario(e.target.value)}
             placeholder="シナリオ名"
-            className="w-44 truncate bg-transparent font-mono text-[10px] text-slate-500 outline-none placeholder-slate-700 focus:text-slate-300"
+            className="w-44 truncate bg-transparent font-mono text-[10px] text-fl-text-dim outline-none placeholder:text-fl-text-ghost focus:text-fl-text"
             title="シナリオ名 (クリックで編集)"
           />
         </div>
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-2">
-        <div className="flex overflow-hidden rounded-lg border border-[#1e293b]">
+        <div className="flex overflow-hidden rounded-lg border border-fl-border-2">
           <button
             type="button"
             onClick={onUndo}
             disabled={!canUndo}
-            className="flex items-center gap-1 border-r border-[#1e293b] bg-[#0f172a] px-2.5 py-1.5 font-mono text-[10px] font-bold text-slate-400 transition-colors hover:text-slate-200 disabled:cursor-not-allowed disabled:text-slate-700 disabled:hover:text-slate-700"
+            className="flex items-center gap-1 border-r border-fl-border-2 bg-fl-panel-2 px-2.5 py-1.5 font-mono text-[10px] font-bold text-fl-text-dim transition-colors hover:text-fl-text disabled:cursor-not-allowed disabled:text-fl-text-ghost disabled:hover:text-fl-text-ghost"
             title="元に戻す (Ctrl+Z)"
           >
             <Undo2 className="h-3 w-3" />
@@ -82,21 +92,21 @@ export function Toolbar({
             type="button"
             onClick={onRedo}
             disabled={!canRedo}
-            className="flex items-center gap-1 bg-[#0f172a] px-2.5 py-1.5 font-mono text-[10px] font-bold text-slate-400 transition-colors hover:text-slate-200 disabled:cursor-not-allowed disabled:text-slate-700 disabled:hover:text-slate-700"
+            className="flex items-center gap-1 bg-fl-panel-2 px-2.5 py-1.5 font-mono text-[10px] font-bold text-fl-text-dim transition-colors hover:text-fl-text disabled:cursor-not-allowed disabled:text-fl-text-ghost disabled:hover:text-fl-text-ghost"
             title="やり直し (Ctrl+Shift+Z)"
           >
             <Redo2 className="h-3 w-3" />
           </button>
         </div>
 
-        <div className="flex overflow-hidden rounded-lg border border-[#1e293b] bg-[#0f172a]">
+        <div className="flex overflow-hidden rounded-lg border border-fl-border-2 bg-fl-panel-2">
           <button
             type="button"
             onClick={() => onModeChange('block')}
-            className="flex items-center gap-1 border-r border-[#1e293b] px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
+            className="flex items-center gap-1 border-r border-fl-border-2 px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
             style={{
-              background: mode === 'block' ? '#3B82F620' : 'transparent',
-              color: mode === 'block' ? '#3B82F6' : '#475569',
+              background: mode === 'block' ? '#3b82f620' : 'transparent',
+              color: mode === 'block' ? '#3b82f6' : 'var(--fl-text-faint)',
             }}
           >
             <Box className="h-3 w-3" /> ブロック追加
@@ -104,10 +114,10 @@ export function Toolbar({
           <button
             type="button"
             onClick={() => onModeChange('link')}
-            className="flex items-center gap-1 border-r border-[#1e293b] px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
+            className="flex items-center gap-1 border-r border-fl-border-2 px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
             style={{
               background: mode === 'link' ? '#60a5fa20' : 'transparent',
-              color: mode === 'link' ? '#60a5fa' : '#475569',
+              color: mode === 'link' ? '#60a5fa' : 'var(--fl-text-faint)',
             }}
             title="2つのブロックをクリックして依存関係を作成"
           >
@@ -119,25 +129,21 @@ export function Toolbar({
             className="flex items-center gap-1 px-3 py-1.5 font-mono text-[10px] font-bold transition-colors"
             style={{
               background: mode === 'sync' ? '#f43f5e20' : 'transparent',
-              color: mode === 'sync' ? '#f43f5e' : '#475569',
+              color: mode === 'sync' ? '#f43f5e' : 'var(--fl-text-faint)',
             }}
           >
             <Hexagon className="h-3 w-3" /> 同期ポイント
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={onAddTrack}
-          className="flex items-center gap-1 rounded-lg border-[1.5px] border-[#334155] bg-[#0f172a] px-3.5 py-1.5 font-mono text-[10px] font-bold text-slate-400"
-        >
+        <button type="button" onClick={onAddTrack} className={chipBase}>
           <Plus className="h-3 w-3" /> トラック
         </button>
 
         <button
           type="button"
           onClick={onSample}
-          className="flex items-center gap-1 rounded-lg border-[1.5px] border-[#334155] bg-[#0f172a] px-3 py-1.5 font-mono text-[10px] font-bold text-slate-400"
+          className={chipBase}
           title="サンプルシナリオを読込"
         >
           <BookOpen className="h-3 w-3" /> サンプル
@@ -146,7 +152,7 @@ export function Toolbar({
         <button
           type="button"
           onClick={onImport}
-          className="flex items-center gap-1 rounded-lg border-[1.5px] border-[#334155] bg-[#0f172a] px-3 py-1.5 font-mono text-[10px] font-bold text-slate-400"
+          className={chipBase}
           title="JSONを読み込み (Ctrl+O)"
         >
           <Upload className="h-3 w-3" /> 読込
@@ -154,7 +160,7 @@ export function Toolbar({
         <button
           type="button"
           onClick={onExport}
-          className="flex items-center gap-1 rounded-lg border-[1.5px] border-[#334155] bg-[#0f172a] px-3 py-1.5 font-mono text-[10px] font-bold text-slate-400"
+          className={chipBase}
           title="JSONを保存 (Ctrl+S)"
         >
           <Download className="h-3 w-3" /> 保存
@@ -162,12 +168,25 @@ export function Toolbar({
 
         <button
           type="button"
+          onClick={onToggleTheme}
+          className="flex h-7 w-7 items-center justify-center rounded-lg border-[1.5px] border-fl-border-strong bg-fl-panel-2 text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text"
+          title={theme === 'dark' ? 'ライトテーマに切替' : 'ダークテーマに切替'}
+        >
+          {theme === 'dark' ? (
+            <Sun className="h-3 w-3" />
+          ) : (
+            <Moon className="h-3 w-3" />
+          )}
+        </button>
+
+        <button
+          type="button"
           onClick={onTogglePlay}
           className="flex items-center gap-1 rounded-lg border-[1.5px] px-4 py-1.5 font-mono text-[10px] font-bold transition-colors"
           style={{
-            borderColor: playing ? '#EF4444' : '#22C55E',
-            background: playing ? '#EF444418' : '#22C55E18',
-            color: playing ? '#EF4444' : '#22C55E',
+            borderColor: playing ? '#ef4444' : '#22c55e',
+            background: playing ? '#ef444418' : '#22c55e18',
+            color: playing ? '#ef4444' : '#22c55e',
           }}
         >
           {playing ? (

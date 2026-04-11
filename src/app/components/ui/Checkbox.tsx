@@ -29,7 +29,7 @@ export function Checkbox({
       disabled={disabled}
       className="flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-sm border outline-none transition-colors disabled:opacity-40"
       style={{
-        borderColor: checked ? accent : '#334155',
+        borderColor: checked ? accent : 'var(--fl-border-strong)',
         background: checked ? `${accent}33` : 'transparent',
       }}
     >

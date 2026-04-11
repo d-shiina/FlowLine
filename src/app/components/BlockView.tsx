@@ -183,10 +183,10 @@ export function BlockView({
           className="truncate font-mono text-[11px]"
           style={{
             color: past
-              ? '#334155'
+              ? 'var(--fl-text-ghost)'
               : block.type === 'subroutine' && !subRef
                 ? '#f59e0b'
-                : '#cbd5e1',
+                : 'var(--fl-text-muted)',
           }}
           title={displayLabel}
         >
