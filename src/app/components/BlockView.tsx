@@ -11,6 +11,13 @@ interface Props {
   selected: boolean;
   linkSource: boolean;
   draggable: boolean;
+  /**
+   * Legal slot range preserving L→R dep order. `min` is one past the
+   * rightmost block this block depends on; `max` is one before the
+   * leftmost block that depends on this one. `max` may be `Infinity`
+   * for blocks with no dependents. Undefined means "no constraint".
+   */
+  slotBounds?: { min: number; max: number };
   subroutines: Subroutine[];
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
@@ -93,6 +100,7 @@ export function BlockView({
   selected,
   linkSource,
   draggable,
+  slotBounds,
   subroutines,
   onSelect,
   onUpdate,
@@ -146,9 +154,17 @@ export function BlockView({
       setDragging(true);
     };
 
+    // Clamp the drop target to the block's legal slot range so a
+    // drag can never invert a dep arrow. `min` comes from deps
+    // (dep.slot + 1); `max` comes from dependents (dependent.slot - 1).
+    // Absence = no constraint.
+    const minSlot = slotBounds?.min ?? 0;
+    const maxSlot = slotBounds?.max ?? Number.POSITIVE_INFINITY;
+
     const updateTarget = (ev: MouseEvent) => {
       const rect = trackCanvas.getBoundingClientRect();
-      targetSlot = Math.max(0, pxToSlot(ev.clientX - rect.left));
+      const raw = Math.max(0, pxToSlot(ev.clientX - rect.left));
+      targetSlot = Math.min(Math.max(raw, minSlot), maxSlot);
       setGhost({
         left: rect.left + targetSlot * SLOT_PX + BLOCK_MARGIN,
         top: rect.top + 8,

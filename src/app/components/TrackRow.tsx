@@ -11,6 +11,12 @@ interface Props {
   track: Track;
   totalSlots: number;
   blockStatus: Record<string, BlockStatus>;
+  /**
+   * Per-block slot range that preserves dep ordering (arrows stay
+   * left-to-right). Computed globally in App.tsx and passed through
+   * so BlockView can clamp the drag target.
+   */
+  slotBounds: Record<string, { min: number; max: number }>;
   currentSlot: number | undefined;
   selectedBlockId: string | null;
   linkSourceBlockId: string | null;
@@ -33,6 +39,7 @@ export function TrackRow({
   track,
   totalSlots,
   blockStatus,
+  slotBounds,
   currentSlot,
   selectedBlockId,
   linkSourceBlockId,
@@ -198,6 +205,7 @@ export function TrackRow({
             selected={selectedBlockId === b.id}
             linkSource={linkSourceBlockId === b.id}
             draggable={blocksDraggable}
+            slotBounds={slotBounds[b.id]}
             subroutines={subroutines}
             onSelect={onSelectBlock}
             onUpdate={onUpdateBlock}

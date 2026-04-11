@@ -28,9 +28,14 @@ interface Edge {
 /**
  * SVG overlay drawing dependency edges between blocks on regular tracks.
  * Edges render as thin curved paths from the source block's right edge
- * to the dependent block's left edge. Cross-track edges curve smoothly;
- * back-edges (dep slot >= target slot — user error) render as straight
- * dashed lines so the mistake is visible.
+ * to the dependent block's left edge. Cross-track edges curve smoothly.
+ *
+ * Backward edges (dep slot ≥ target slot) *should* be impossible to
+ * create through the editor — the drag handler clamps block positions
+ * to their legal slot range, and the link tool swaps direction to
+ * preserve left→right order. The dashed-straight-line fallback remains
+ * only as a defensive render for JSON imports that might carry legacy
+ * backward deps; users should never see it from fresh edits.
  *
  * Edges touching the selected block are highlighted. Rendering is
  * pointer-events: none — the overlay is purely visual.

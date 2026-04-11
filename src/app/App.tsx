@@ -35,6 +35,29 @@ type EditorMode =
   | { type: 'scenario' }
   | { type: 'subroutine'; id: string };
 
+/**
+ * Locate a block anywhere in the scenario and return it together with
+ * its owning container id. Used by the link tool to decide which end
+ * of a new dep edge should be the dependent so the arrow always
+ * points left→right.
+ */
+function findBlockById(
+  scenario: Scenario,
+  blockId: string,
+): { block: Block; containerId: string } | null {
+  for (const t of scenario.tracks) {
+    const hit = t.blocks.find((b) => b.id === blockId);
+    if (hit) return { block: hit, containerId: t.id };
+  }
+  const eh = scenario.errorHandler.blocks.find((b) => b.id === blockId);
+  if (eh) return { block: eh, containerId: ERROR_HANDLER_ID };
+  for (const sub of scenario.subroutines) {
+    const hit = sub.blocks.find((b) => b.id === blockId);
+    if (hit) return { block: hit, containerId: sub.id };
+  }
+  return null;
+}
+
 export default function App() {
   const store = useScenario();
   const { scenario } = store;
@@ -76,6 +99,64 @@ export default function App() {
   const playing = execution.running;
   const blockStatus = execution.state.status;
   const currentSlotByTrack = execution.state.currentSlot;
+
+  // For each block, compute the range of slots it can legally occupy
+  // without inverting any dep arrow. `min` is one past the rightmost
+  // block it depends on; `max` is one before the leftmost block that
+  // depends on it. Bounds are global (deps can cross tracks), so we
+  // look at every block regardless of container. Subroutines are
+  // self-contained graphs, so they're computed separately.
+  //
+  // The drag handler reads this via BlockView's `slotBounds` prop and
+  // clamps the target slot so L→R order is always preserved — the
+  // "backward arrow" case that used to be rendered as a dashed user-
+  // error line simply can't be constructed through dragging anymore.
+  const blockSlotBounds = useMemo(() => {
+    const acc: Record<string, { min: number; max: number }> = {};
+
+    // Compute bounds for one isolated dep graph (an array of block
+    // arrays that share a single dep namespace). Main graph = regular
+    // tracks + error handler. Each subroutine is its own graph.
+    const computeFor = (containers: Block[][]) => {
+      const slotOf = new Map<string, number>();
+      const dependentsOf = new Map<string, string[]>();
+      for (const blocks of containers) {
+        for (const b of blocks) slotOf.set(b.id, b.slot);
+      }
+      for (const blocks of containers) {
+        for (const b of blocks) {
+          for (const d of b.deps) {
+            const arr = dependentsOf.get(d);
+            if (arr) arr.push(b.id);
+            else dependentsOf.set(d, [b.id]);
+          }
+        }
+      }
+      for (const blocks of containers) {
+        for (const b of blocks) {
+          let min = 0;
+          for (const d of b.deps) {
+            const ds = slotOf.get(d);
+            if (ds !== undefined) min = Math.max(min, ds + 1);
+          }
+          let max = Number.POSITIVE_INFINITY;
+          for (const did of dependentsOf.get(b.id) ?? []) {
+            const ds = slotOf.get(did);
+            if (ds !== undefined) max = Math.min(max, ds - 1);
+          }
+          acc[b.id] = { min, max };
+        }
+      }
+    };
+
+    computeFor([
+      ...scenario.tracks.map((t) => t.blocks),
+      scenario.errorHandler.blocks,
+    ]);
+    for (const sub of scenario.subroutines) computeFor([sub.blocks]);
+
+    return acc;
+  }, [scenario]);
 
   const totalSlots = useMemo(() => {
     let max = MIN_SLOTS;
@@ -228,15 +309,31 @@ export default function App() {
           setLinkSource(null); // clicking the source again cancels
           return;
         }
-        // Second click → add source as a dep of this block
-        store.addDep(trackId, blockId, linkSource.blockId);
+        // Decide which block is the dep and which is the dependent by
+        // slot, so the arrow is always drawn left→right regardless of
+        // which end the user clicked first. Same-slot clicks are
+        // rejected because the direction would be ambiguous.
+        const a = findBlockById(scenario, linkSource.blockId);
+        const b = findBlockById(scenario, blockId);
+        if (a && b) {
+          if (a.block.slot < b.block.slot) {
+            store.addDep(trackId, blockId, linkSource.blockId);
+          } else if (a.block.slot > b.block.slot) {
+            store.addDep(
+              linkSource.trackId,
+              linkSource.blockId,
+              blockId,
+            );
+          }
+          // slot === slot: ignore, ambiguous direction.
+        }
         setLinkSource(null);
         setSelected({ trackId, blockId });
         return;
       }
       setSelected({ trackId, blockId });
     },
-    [mode, linkSource, store],
+    [mode, linkSource, store, scenario],
   );
 
   // ─── JSON import / export ──────────────────────────────────────────
@@ -552,6 +649,7 @@ export default function App() {
                     track={track}
                     totalSlots={totalSlots}
                     blockStatus={blockStatus}
+                    slotBounds={blockSlotBounds}
                     currentSlot={currentSlotByTrack[track.id]}
                     selectedBlockId={selected?.blockId ?? null}
                     linkSourceBlockId={linkSource?.blockId ?? null}
@@ -607,6 +705,7 @@ export default function App() {
                   track={scenario.errorHandler}
                   totalSlots={totalSlots}
                   blockStatus={blockStatus}
+                  slotBounds={blockSlotBounds}
                   currentSlot={currentSlotByTrack[ERROR_HANDLER_ID]}
                   selectedBlockId={selected?.blockId ?? null}
                   linkSourceBlockId={linkSource?.blockId ?? null}
@@ -662,6 +761,7 @@ export default function App() {
                     track={subroutineTrack}
                     totalSlots={totalSlots}
                     blockStatus={blockStatus}
+                    slotBounds={blockSlotBounds}
                     currentSlot={currentSlotByTrack[subroutineTrack.id]}
                     selectedBlockId={selected?.blockId ?? null}
                     linkSourceBlockId={linkSource?.blockId ?? null}
