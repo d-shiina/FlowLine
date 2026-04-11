@@ -73,6 +73,18 @@ export interface Block {
   onError?: OnError;
   /** For `type: 'subroutine'` blocks, the id of the subroutine to call. */
   subroutineId?: string;
+  /**
+   * Id of the container block (loop / branch) this block is nested
+   * inside. When set, the renderer wraps the container and its
+   * children in a coloured frame so the scope is visually obvious,
+   * and the engine will eventually execute the children inside the
+   * container's control flow (loop body, branch `then`/`else`).
+   *
+   * Children must live on the same track as their parent. The
+   * container block itself never has a ``parentBlockId`` pointing
+   * at another container — we don't support nested containers yet.
+   */
+  parentBlockId?: string;
 }
 
 export interface Track {

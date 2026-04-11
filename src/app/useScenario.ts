@@ -331,7 +331,18 @@ export function useScenario(): ScenarioStore {
   const deleteBlock = useCallback(
     (containerId: string, blockId: string) => {
       commit((s) => {
-        const removed = mapContainerBlocks(s, containerId, (blocks) =>
+        // Orphan any blocks that were nested inside this one so the
+        // container frame disappears but the child blocks stay put.
+        // Done before the removal so the same container mapper pass
+        // handles both.
+        const orphaned = mapContainerBlocks(s, containerId, (blocks) =>
+          blocks.map((b) =>
+            b.parentBlockId === blockId
+              ? { ...b, parentBlockId: undefined }
+              : b,
+          ),
+        );
+        const removed = mapContainerBlocks(orphaned, containerId, (blocks) =>
           blocks.filter((b) => b.id !== blockId),
         );
         return cascadeDeleteDep(removed, blockId);

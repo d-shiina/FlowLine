@@ -17,6 +17,12 @@ interface Props {
   nodeManifest: NodeManifestEntry[];
   /** Current scenario-scope variables (for the var picker). */
   scenarioVariables: Record<string, unknown>;
+  /**
+   * Loop / branch blocks on the same container as the selected block
+   * that it can be nested inside. Empty for blocks that are
+   * themselves containers (we don't support nested containers yet).
+   */
+  availableContainers: Array<{ id: string; label: string; type: string }>;
   /** Called when the user creates a new variable via the out-port helper. */
   onCreateVariable: (key: string, value: unknown) => void;
   onChange: (trackId: string, blockId: string, patch: Partial<Block>) => void;
@@ -58,6 +64,7 @@ export function Inspector({
   resolveDepLabel,
   nodeManifest,
   scenarioVariables,
+  availableContainers,
   onCreateVariable,
   onChange,
   onRemoveDep,
@@ -202,6 +209,38 @@ export function Inspector({
           className="rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none"
         />
       </label>
+
+      {/* Only non-container blocks can be nested. Containers
+          themselves can't be nested inside other containers yet. */}
+      {block.type !== 'loop' &&
+        block.type !== 'branch' &&
+        availableContainers.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <span className="font-mono text-[9px] text-fl-text-faint">
+              内包先
+            </span>
+            <Select<string>
+              value={block.parentBlockId ?? ''}
+              onValueChange={(v) =>
+                onChange(trackId, block.id, {
+                  parentBlockId: v === '' ? undefined : v,
+                })
+              }
+              options={[
+                { value: '', label: '(なし)' },
+                ...availableContainers.map((c) => ({
+                  value: c.id,
+                  label: `${c.type === 'loop' ? '↻' : '⑂'} ${c.label}`,
+                })),
+              ]}
+            />
+            {block.parentBlockId && (
+              <span className="font-mono text-[8px] text-fl-text-ghost">
+                このブロックは親コンテナのボディとして実行されます
+              </span>
+            )}
+          </div>
+        )}
 
       {block.type === 'action' && (
         <div className="flex flex-col gap-1">

@@ -235,6 +235,33 @@ export default function App() {
 
   const isErrorHandlerSelection = selected?.trackId === ERROR_HANDLER_ID;
 
+  // List the loop / branch blocks that live on the same container as
+  // the current selection so Inspector's "内包先" dropdown can offer
+  // them as nesting targets. Excludes the selected block itself so
+  // you can't nest a container inside itself, and is empty when no
+  // block is selected.
+  const availableContainers = useMemo(() => {
+    if (!selected) return [];
+    const findContainer = (): Block[] | null => {
+      if (selected.trackId === ERROR_HANDLER_ID) {
+        return scenario.errorHandler.blocks;
+      }
+      const t = scenario.tracks.find((x) => x.id === selected.trackId);
+      if (t) return t.blocks;
+      const sub = scenario.subroutines.find((s) => s.id === selected.trackId);
+      return sub ? sub.blocks : null;
+    };
+    const blocks = findContainer();
+    if (!blocks) return [];
+    return blocks
+      .filter(
+        (b) =>
+          b.id !== selected.blockId &&
+          (b.type === 'loop' || b.type === 'branch'),
+      )
+      .map((b) => ({ id: b.id, label: b.label, type: b.type }));
+  }, [selected, scenario]);
+
   /**
    * Resolve a dep id back to a human-readable label ("label #slot") by
    * walking every block container. Used by the Inspector deps list.
@@ -871,6 +898,7 @@ export default function App() {
           resolveDepLabel={resolveDepLabel}
           nodeManifest={nodeManifest}
           scenarioVariables={scenario.variables.scenario}
+          availableContainers={availableContainers}
           onCreateVariable={store.setVariable}
           onChange={store.updateBlock}
           onRemoveDep={store.removeDep}

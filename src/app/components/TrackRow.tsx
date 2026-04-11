@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { Block, Subroutine, Track } from '../types';
+import { BLOCK_META } from '../types';
 import type { BlockStatus } from '../engine';
-import { HEADER_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
+import { BLOCK_MARGIN, HEADER_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
 import { BlockView } from './BlockView';
 
 type Variant = 'normal' | 'error';
@@ -68,6 +69,41 @@ export function TrackRow({
     const slot = pxToSlot(e.clientX - rect.left);
     onCanvasClick(track.id, slot);
   };
+
+  // Compute the set of container-frame rects for loop / branch
+  // blocks on this track. Each container wraps itself plus any
+  // blocks whose `parentBlockId` points at it, so the scope is
+  // visually obvious without an explicit "body" editor. Blocks with
+  // no children render normally — only populated containers get a
+  // frame. Sorted by leftmost slot so overlapping frames layer
+  // predictably (leftmost drawn first).
+  const containerFrames = useMemo(() => {
+    const frames: Array<{
+      id: string;
+      label: string;
+      color: string;
+      fromSlot: number;
+      toSlot: number;
+    }> = [];
+    for (const parent of track.blocks) {
+      if (parent.type !== 'loop' && parent.type !== 'branch') continue;
+      const children = track.blocks.filter(
+        (b) => b.parentBlockId === parent.id,
+      );
+      if (children.length === 0) continue;
+      const childMin = Math.min(...children.map((c) => c.slot));
+      const childMax = Math.max(...children.map((c) => c.slot));
+      frames.push({
+        id: parent.id,
+        label: parent.label,
+        color: BLOCK_META[parent.type].color,
+        fromSlot: Math.min(parent.slot, childMin),
+        toSlot: Math.max(parent.slot, childMax),
+      });
+    }
+    frames.sort((a, b) => a.fromSlot - b.fromSlot);
+    return frames;
+  }, [track.blocks]);
 
   return (
     <div
@@ -178,6 +214,44 @@ export function TrackRow({
             + エラー時のクリーンアップ・通知を配置（クリック）
           </div>
         )}
+
+        {/* Container frames (loop / branch scope visualisation).
+            Rendered behind the blocks so the blocks themselves stay
+            interactive. A thin header strip at the top carries the
+            container label so you can tell multiple nested scopes
+            apart at a glance. */}
+        {containerFrames.map((f) => {
+          const left = f.fromSlot * SLOT_PX + BLOCK_MARGIN / 2;
+          const width =
+            (f.toSlot - f.fromSlot + 1) * SLOT_PX - BLOCK_MARGIN;
+          return (
+            <div
+              key={f.id}
+              className="pointer-events-none absolute rounded-lg border-[1.5px] border-dashed"
+              style={{
+                left,
+                width,
+                top: 3,
+                bottom: 3,
+                borderColor: `${f.color}88`,
+                background: `${f.color}0f`,
+                zIndex: 0,
+              }}
+              title={`${f.label} (内包ブロックをまとめて表示)`}
+            >
+              <div
+                className="absolute top-0 flex items-center gap-1 rounded-br-md px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider"
+                style={{
+                  left: 0,
+                  color: f.color,
+                  background: `${f.color}22`,
+                }}
+              >
+                {f.label}
+              </div>
+            </div>
+          );
+        })}
 
         {/* per-track playhead: column highlight on the block currently
             running, so the user can see where each parallel track is. */}
