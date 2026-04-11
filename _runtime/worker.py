@@ -1,11 +1,12 @@
 """FLOWLINE per-track Python worker.
 
-Spawned once per track by the Electron main process. Listens on
-stdin for JSON-line commands from the engine and streams events
-back on stdout. See docs/03-nodes.md for the high-level design.
+Spawned once per track by the Electron main process and kept alive
+between Run invocations. Listens on stdin for JSON-line commands
+from the engine and streams events back on stdout. See
+docs/03-nodes.md (rev2) for the high-level design.
 
-Phase 2a protocol
-=================
+Protocol
+========
 
 Every line on either side is a complete JSON object terminated by
 ``\\n``. Extra whitespace inside the JSON is fine. Anything that
@@ -16,19 +17,21 @@ Engine → worker::
 
     { "type": "hello" }
     { "type": "run_node",
-      "reqId": "r-7",
+      "reqId":   "r-7",
       "blockId": "b-3",
       "trackId": "t-main",
-      "nodeId": "debug/log",
-      "params": { "message": "hello" },
+      "nodeId":  "debug/log",
+      "params":  { "message": "hello" },
+      "ports":   { "message": "hello" },
       "timeout": 5 }
-    { "type": "cancel", "reqId": "r-7" }
+    { "type": "cancel",   "reqId": "r-7" }
+    { "type": "reset" }
     { "type": "shutdown" }
 
 Worker → engine::
 
     { "type": "ready",
-      "nodes": [ { "id": "debug/log", "label": "..." }, ... ] }
+      "nodes": [ { "id": "debug/log", "label": "...", "ports": {...}, ... }, ... ] }
     { "type": "log",
       "reqId": "r-7",
       "blockId": "b-3",
@@ -36,20 +39,25 @@ Worker → engine::
       "level": "info",
       "message": "..." }
     { "type": "result",
-      "reqId": "r-7",
+      "reqId":   "r-7",
       "blockId": "b-3",
       "trackId": "t-main",
-      "ok": true,
+      "ok":      true,
       "missing": false,
-      "errorMessage": null,
-      "outputs": { ... } }
+      "outputs": { ... },
+      "error":   null }
     { "type": "fatal", "message": "..." }
 
-The worker executes nodes on a background thread so cancellation
-can be signalled through a threading.Event while the main thread
-keeps reading stdin. Only one node runs per worker at a time —
-tracks are serial by design, parallelism lives at the scenario
-level in the TS engine.
+**Error policy lives in the engine.** The worker reports
+``ok: false`` + ``error`` when something goes wrong; it never
+decides between abort / skip / ignore / retry — that's resolved
+engine-side from the block's effective ``onError``. ``missing:
+true`` is the only hint the worker provides, so the engine can
+apply ``skipIfMissing`` without the worker knowing that flag
+exists.
+
+Only one node runs per worker at a time — tracks are serial by
+design, parallelism lives at the scenario level in the TS engine.
 """
 
 from __future__ import annotations
@@ -111,8 +119,11 @@ def discover_nodes() -> None:
     """Import every ``*.py`` under ``_runtime/nodes/`` so their
     ``@flowline.node`` decorators populate ``flowline.REGISTRY``.
 
-    Failures on individual files log to stderr and are otherwise
-    swallowed so a single broken node can't brick a worker.
+    Individual file failures log to stderr and are otherwise
+    swallowed so one broken node can't brick a worker. The
+    exception is ``NodeIdCollisionError``, which is a hard-error
+    the worker re-raises so the engine learns about the conflict
+    via ``fatal``.
     """
     base = _ROOT / "nodes"
     if not base.exists():
@@ -129,6 +140,9 @@ def discover_nodes() -> None:
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
+        except flowline.NodeIdCollisionError:
+            # Bubble up so main() converts it to a ``fatal`` frame.
+            raise
         except Exception as exc:
             log_stderr(f"failed to load {module_name}: {exc}")
             log_stderr(traceback.format_exc())
@@ -159,12 +173,15 @@ _current: Optional[Execution] = None
 _current_lock = threading.Lock()
 
 
-def _resolve_params(spec: flowline.NodeSpec, override: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_params(
+    spec: flowline.NodeSpec, override: Dict[str, Any]
+) -> Dict[str, Any]:
     """Overlay JSON overrides on top of the decorator's defaults.
 
     The decorator stores params as ``{"name": {"default": ..., ...}}``.
     For Phase 2a we only consume the ``default`` entry; full schema
-    validation comes later.
+    validation comes later. JSON overrides always win (docs §
+    "デコレータ vs JSON の優先順位").
     """
     merged: Dict[str, Any] = {}
     for key, meta in spec.params.items():
@@ -175,9 +192,45 @@ def _resolve_params(spec: flowline.NodeSpec, override: Dict[str, Any]) -> Dict[s
     return merged
 
 
+def _filter_outputs(
+    spec: flowline.NodeSpec,
+    raw: Any,
+    warn: Any,
+) -> Dict[str, Any]:
+    """Keep only keys declared as out-ports on the node.
+
+    Non-dict return values degrade to ``{}``. Keys that aren't
+    declared as out-ports are dropped with a warning log so node
+    authors catch typos early. ``warn`` is a callback (so we can
+    route to ``ctx.log`` without threading the context through).
+    """
+    if not isinstance(raw, dict):
+        return {}
+    allowed = {
+        name
+        for name, meta in spec.ports.items()
+        if isinstance(meta, dict) and meta.get("kind") == "out"
+    }
+    filtered: Dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in allowed:
+            filtered[key] = value
+        else:
+            try:
+                warn(
+                    "warn",
+                    f"node {spec.id!r} returned undeclared output key "
+                    f"{key!r}; drop or declare it as an out port",
+                )
+            except Exception:
+                pass
+    return filtered
+
+
 def _run_node_thread(
     execution: Execution,
     node_id: str,
+    ports: Dict[str, Any],
     params_override: Dict[str, Any],
     timeout: Optional[float],
 ) -> None:
@@ -218,8 +271,11 @@ def _run_node_thread(
                 "trackId": execution.track_id,
                 "ok": False,
                 "missing": False,
-                "errorMessage": f"unknown node id: {node_id}",
                 "outputs": {},
+                "error": {
+                    "message": f"unknown node id: {node_id}",
+                    "traceback": None,
+                },
             }
         )
         _clear_current(execution)
@@ -228,30 +284,37 @@ def _run_node_thread(
     resolved_params = _resolve_params(spec, params_override)
     ok = True
     missing = False
-    error_message: Optional[str] = None
-    outputs: Any = {}
+    error_payload: Optional[Dict[str, Any]] = None
+    outputs: Dict[str, Any] = {}
 
     try:
-        result = spec.run(resolved_params, ctx)
-        if isinstance(result, dict):
-            outputs = result
-        else:
-            outputs = {}
+        # Install the stdlib logging bridge for the duration of the
+        # call so third-party library logs show up in the engine.
+        with flowline.logging_bridge(ctx):
+            result = spec.run(ports, resolved_params, ctx)
+        outputs = _filter_outputs(spec, result, ctx.log)
     except FileNotFoundError as exc:
         ok = False
         missing = True
-        error_message = f"target not found: {exc}"
+        error_payload = {
+            "message": f"target not found: {exc}",
+            "traceback": traceback.format_exc(),
+        }
     except Exception as exc:
         ok = False
-        error_message = f"{type(exc).__name__}: {exc}"
-        log_stderr(traceback.format_exc())
+        error_payload = {
+            "message": f"{type(exc).__name__}: {exc}",
+            "traceback": traceback.format_exc(),
+        }
+        log_stderr(error_payload["traceback"])
 
-    # Cancellation takes precedence in the reported status so the
-    # engine can distinguish "crashed" from "user hit stop".
-    if execution.cancel_event.is_set():
-        ok = False
-        if error_message is None:
-            error_message = "cancelled"
+    # If the node raised AND the user also hit cancel, prefer the
+    # "cancelled" label so the engine can distinguish user abort
+    # from genuine crashes. A cancel that arrived after a clean
+    # completion is a no-op — we don't second-guess a node that
+    # already returned its outputs successfully.
+    if not ok and execution.cancel_event.is_set():
+        error_payload = {"message": "cancelled", "traceback": None}
 
     emit(
         {
@@ -261,8 +324,8 @@ def _run_node_thread(
             "trackId": execution.track_id,
             "ok": ok,
             "missing": missing,
-            "errorMessage": error_message,
             "outputs": outputs,
+            "error": error_payload,
         }
     )
 
@@ -289,6 +352,7 @@ def handle_run_node(msg: Dict[str, Any]) -> None:
     track_id = str(msg.get("trackId") or "")
     node_id = str(msg.get("nodeId") or "")
     params = msg.get("params") or {}
+    ports = msg.get("ports") or {}
     timeout = msg.get("timeout")
 
     with _current_lock:
@@ -301,8 +365,11 @@ def handle_run_node(msg: Dict[str, Any]) -> None:
                     "trackId": track_id,
                     "ok": False,
                     "missing": False,
-                    "errorMessage": "worker busy",
                     "outputs": {},
+                    "error": {
+                        "message": "worker busy",
+                        "traceback": None,
+                    },
                 }
             )
             return
@@ -311,7 +378,7 @@ def handle_run_node(msg: Dict[str, Any]) -> None:
 
     thread = threading.Thread(
         target=_run_node_thread,
-        args=(exe, node_id, params, timeout),
+        args=(exe, node_id, ports, params, timeout),
         daemon=True,
         name=f"flowline-node-{req_id}",
     )
@@ -327,6 +394,19 @@ def handle_cancel(msg: Dict[str, Any]) -> None:
         if req_id and _current.req_id != req_id:
             return
         _current.cancel_event.set()
+
+
+def handle_reset() -> None:
+    """Clear per-run state between scenario executions.
+
+    Phase 2a keeps this minimal: the worker holds no track-scope
+    variables yet (those live in the engine). We do signal-cancel
+    any straggler execution so a run that ended on abort doesn't
+    leak into the next one.
+    """
+    with _current_lock:
+        if _current is not None:
+            _current.cancel_event.set()
 
 
 def handle_shutdown() -> None:
@@ -345,19 +425,42 @@ def handle_shutdown() -> None:
     sys.exit(0)
 
 
-def main() -> None:
-    discover_nodes()
+def _manifest_entry(spec: flowline.NodeSpec) -> Dict[str, Any]:
+    """Serialisable description of a registered node for ``ready``.
 
-    nodes_payload = [
+    The engine uses this to populate the AddBlockModal palette
+    without having to re-read node source files.
+    """
+    return {
+        "id": spec.id,
+        "label": spec.label,
+        "labels": dict(spec.labels),
+        "category": spec.category,
+        "version": spec.version,
+        "ports": {k: dict(v) for k, v in spec.ports.items()},
+        "params": {k: dict(v) if isinstance(v, dict) else v for k, v in spec.params.items()},
+        "onError": spec.on_error,
+    }
+
+
+def main() -> None:
+    try:
+        discover_nodes()
+    except flowline.NodeIdCollisionError as exc:
+        # Fatal: refuse to start rather than serve an ambiguous
+        # registry. The engine surfaces this as a startup error.
+        emit({"type": "fatal", "message": str(exc)})
+        log_stderr(f"node id collision: {exc}")
+        sys.exit(1)
+
+    emit(
         {
-            "id": spec.id,
-            "label": spec.label,
-            "category": spec.category,
-            "version": spec.version,
+            "type": "ready",
+            "nodes": [
+                _manifest_entry(spec) for spec in flowline.REGISTRY.values()
+            ],
         }
-        for spec in flowline.REGISTRY.values()
-    ]
-    emit({"type": "ready", "nodes": nodes_payload})
+    )
 
     try:
         for raw in sys.stdin:
@@ -378,6 +481,8 @@ def main() -> None:
                 handle_run_node(msg)
             elif kind == "cancel":
                 handle_cancel(msg)
+            elif kind == "reset":
+                handle_reset()
             elif kind == "shutdown":
                 handle_shutdown()
                 return

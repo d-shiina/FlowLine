@@ -96,3 +96,6 @@ dist/
 
 # Locally-installed Python runtime (python-build-standalone extract)
 _runtime/python/
+
+# Python bytecode from the worker / nodes
+_runtime/**/__pycache__/

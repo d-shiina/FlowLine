@@ -1,18 +1,28 @@
 # FLOWLINE — ノード設計
 
-> **ステータス**: 2026-04 決定版。原案に対して 7 項目の論点反映済み。
+> **ステータス**: 2026-04 rev2。当初原案 (rev1) に対する 6 点の構造変更を反映。
 > Phase 2（Python 実行エンジン）の実装ガイドとして使う。
+
+### rev1 → rev2 の主な変更
+
+1. `inputs` / `outputs` 文字列リスト → **ポートベース I/O + シナリオ変数バインディング**
+2. Run ごとの spawn/kill → **常駐ワーカープール (アイドル保持 + reset)**
+3. `escalate` をワーカーが返す → **エラーポリシーは engine 専権**
+4. ID 衝突 last-wins → **ロード時ハードエラー (`overrides=True` のみ例外)**
+5. 式言語を **JSON Logic** に確定 (loop / branch の条件)
+6. ノード `run()` 実行中は stdlib `logging` → `ctx.log()` に**自動ブリッジ**
 
 ---
 
 ## 設計原則
 
 1. **built-in と custom の 2 層分離** — フロー制御は engine に内蔵、操作系は差し替え可能に
-2. **トラック単位のワーカープロセス** — ノード単位の subprocess ではなく、トラック単位で常駐
-3. **inputs / outputs 宣言 + バルク IPC** — 実行前後の 1 往復で変数を同期
+2. **トラック単位の常駐ワーカープロセス** — アイドル状態で保持、Run ごとに reset するだけ
+3. **ポートベース I/O + バインディング** — ノードはポートを宣言、シナリオ JSON がシナリオ変数と繋ぐ
 4. **JSON が常にデコレータを上書き** — シナリオ作者はコードを触らずにノード挙動を調整できる
-5. **ノード ID は ASCII、label は多言語** — 国際化と diff の読みやすさの両立
-6. **`.fln` = ZIP、ソースオープン、ただし **インストール時に確認ダイアログ**** — エコシステム広がりと安全性の両立
+5. **エラーポリシーは engine 専権** — ワーカーは「何が起きたか」のみ、「どうするか」は engine
+6. **ノード ID は ASCII、label は多言語** — 国際化と diff の読みやすさの両立
+7. **`.fln` = ZIP、ソースオープン、ただし **インストール時に確認ダイアログ**** — エコシステム広がりと安全性の両立
 
 ---
 
@@ -50,14 +60,14 @@ engine.py 内で直接実行される。**フロー制御のみ** 担当し、�
 
 ## 実行モデル
 
-### トラック単位のワーカープロセス
+### トラック単位 × 常駐ワーカープール
 
 ```
-Electron (engine orchestrator)
- ├─ python_track_1.exe   ← Track 1 の全ノードを順に実行
- ├─ python_track_2.exe   ← Track 2 の全ノードを順に実行
- ├─ python_track_3.exe   ← Track 3 の全ノードを順に実行
- └─ python_error.exe     ← エラー処理トラック用（idle）
+Electron (engine orchestrator, TS)
+ ├─ python_worker_1   ← Track 1 に割り当て (アイドル保持)
+ ├─ python_worker_2   ← Track 2 に割り当て
+ ├─ python_worker_3   ← Track 3 に割り当て
+ └─ python_worker_err ← エラー処理トラック専用
 ```
 
 **なぜノード単位ではなくトラック単位か:**
@@ -72,61 +82,100 @@ Electron (engine orchestrator)
 500-800 ms かかる。100 ノードのシナリオがノード単位起動だと import オーバーヘッドだけで
 数分溶ける。トラック単位ならトラックあたり 1 回で済む。
 
-### ワーカーのライフサイクル
+**さらに**、Run のたびに spawn/kill するのも勿体ない。編集 → 実行 → 編集を 1 分に
+何度も繰り返すノード開発中、毎回 import warmup を払うのは試行回数を削る。
+
+### 常駐プールと reset
+
+- **lazy spawn**: 最初の Run 要求時に不足分のワーカーを立ち上げる、以降は保持
+- **Run 終了時**: kill せず `reset` コマンドで track-scope 変数をクリアするだけ
+- **アイドル時間 5 分で自動停止**: メモリ解放 (設定で変更可)
+- **Toolbar の Python チップから明示停止**: 手動でランタイムを畳める
+- **クラッシュ時**: 該当ワーカーだけを再 spawn、他のトラックは継続
+
+### ワーカーのライフサイクル (1 Run 内)
 
 ```
-1. Electron が engine.py を起動
-2. engine.py がシナリオを解釈、トラック数だけ python_worker.py を spawn
-3. 各ワーカーは起動時に全ノードモジュールを import（1 回だけ）
-4. engine から JSON でノード実行指示が届くたびに、指定ノードの run() を呼ぶ
-5. 結果を JSON で返す
-6. シナリオ終了 or abort でワーカー停止
+1. engine が実行開始、必要トラック数ぶんワーカーを確保 (不足分を lazy spawn)
+2. 各ワーカーに { "type": "reset" } を送って前回状態をクリア
+3. ブロック実行ごとに engine → worker に { "type": "run_node", ... }
+4. ワーカーが run() を実行、log / result を engine にストリーム
+5. キャンセル時: engine → worker に { "type": "cancel" }、worker が cancel_event をセット
+   ノード内の ctx.cancelled チェックで協調キャンセル
+6. Run 終了: engine が { "type": "reset" } を送って idle に戻す (kill しない)
 ```
 
 ### IPC プロトコル
 
-stdin/stdout の JSON ライン。engine → worker:
+stdin/stdout の JSON ライン。全フレームが 1 行 1 オブジェクト + `\n`。
 
+**engine → worker**: `run_node`
 ```jsonc
 {
-  "type": "run_node",
-  "blockId": "b-10",
-  "nodeId": "desktop/click",
-  "params": { "method": "xpath", "value": "//Button[@Name='OK']", "timeout": 5 },
-  "inputs": {
-    "scenario.target": "メインウィンドウ"
-  }
+  "type":     "run_node",
+  "reqId":    "r-42",
+  "blockId":  "b-10",
+  "trackId":  "t-main",
+  "nodeId":   "desktop/click",
+  "params":   { "method": "xpath", "value": "//Button[@Name='OK']", "timeout": 5 },
+  "ports":    { "target": "メインウィンドウ" }   // in ポートを engine が事前解決
 }
 ```
 
-worker → engine:
+**worker → engine**: ログ (逐次ストリーム、result を待たない)
+```jsonc
+{ "type": "log", "reqId": "r-42", "blockId": "b-10", "level": "info",
+  "message": "クリック実行中…" }
+```
 
+**worker → engine**: 成功
 ```jsonc
 {
-  "type": "result",
+  "type":    "result",
+  "reqId":   "r-42",
   "blockId": "b-10",
-  "status": "ok",
-  "outputs": {
-    "scenario.last_click": "ok"
-  },
-  "logs": [
-    { "level": "info", "message": "クリック成功" }
-  ]
+  "ok":      true,
+  "outputs": { "result": "ok" }   // 宣言した out ポートのみ
 }
 ```
 
-エラー時:
-
+**worker → engine**: 失敗 (ポリシーは engine が決定)
 ```jsonc
 {
-  "type": "result",
-  "blockId": "b-10",
-  "status": "error",
-  "escalate": "abort",     // Layer 2 へ
+  "type":      "result",
+  "reqId":     "r-42",
+  "blockId":   "b-10",
+  "ok":        false,
+  "missing":   false,                // ターゲット未検出は true (skipIfMissing 用)
   "error": {
-    "message": "ターゲットが見つからない",
+    "message":   "ターゲットが見つからない",
     "traceback": "..."
   }
+}
+```
+
+ワーカーは `escalate` や `onError` を**知らない**。engine がブロック定義の
+`onError` (JSON > デコレータ) を解決して abort / skip / ignore / retry(n) を適用する。
+retry はもう一度 `run_node` を投げ直す形で実装する。
+
+**engine → worker**: その他のコマンド
+```jsonc
+{ "type": "hello" }                           // ハンドシェイク
+{ "type": "cancel",   "reqId": "r-42" }       // 実行中のキャンセル
+{ "type": "reset" }                           // Run 間の状態クリア
+{ "type": "shutdown" }                        // プロセス終了
+```
+
+**worker → engine**: 起動完了通知
+```jsonc
+{
+  "type":  "ready",
+  "nodes": [
+    { "id": "desktop/click", "label": "クリック", "labels": {"ja": "クリック", "en": "Click"},
+      "category": "desktop", "version": "1.0.0",
+      "ports":  { "target": {"kind": "in", "type": "string"}, "result": {"kind": "out", "type": "string"} },
+      "params": { ... } }
+  ]
 }
 ```
 
@@ -134,79 +183,90 @@ worker → engine:
 
 ## カスタムノードのインターフェース
 
-### デコレータ定義
+### ポートベース I/O
+
+ノードは「このブロックが何を入出力するか」を **ポート** で宣言する。変数名はノード側に
+書かず、シナリオ JSON の **バインディング** でシナリオ変数と繋ぐ。これにより同じノードが
+異なるシナリオで別の変数を参照して使い回せる。
 
 ```python
 # nodes/desktop/click.py
 from flowline import node
 
 @node(
-    id       = "desktop/click",     # ASCII、category/name 形式
-    label    = "クリック",            # 表示用（i18n 可）
-    labels   = {                    # 多言語化したい場合
-        "ja": "クリック",
-        "en": "Click",
-    },
-    category = "desktop",           # desktop / file / cloud / logic / custom
+    id       = "desktop/click",
+    label    = "クリック",
+    labels   = { "ja": "クリック", "en": "Click" },
+    category = "desktop",
     version  = "1.0.0",
 
-    # このノードが読む / 書く変数を「宣言」する
-    inputs  = ["scenario.target"],
-    outputs = ["scenario.last_click"],
+    # ポート定義: このノードが in / out で持つ論理変数
+    ports = {
+        "target": { "kind": "in",  "type": "string", "required": True },
+        "result": { "kind": "out", "type": "string" },
+    },
 
     # パラメータのデフォルト値とスキーマ
-    params  = {
+    params = {
         "method":  { "type": "enum", "choices": ["image", "xpath", "text", "coordinate"], "default": "image" },
         "value":   { "type": "string", "default": "" },
         "timeout": { "type": "number", "default": 5 },
     },
 
-    # デフォルト挙動（JSON で上書きされる）
+    # デフォルト挙動 (JSON で上書きされる)
     onError = "abort",               # abort | skip | ignore | retry(n)
 )
-def run(inputs, params, ctx):
-    target = inputs["scenario.target"]
-    method = params["method"]
-    value  = params["value"]
+def run(ports, params, ctx):
+    target = ports["target"]
 
-    ctx.log("info", f"クリック実行: {method}={value}")
-    do_click(method, value, target)
+    ctx.log("info", f"クリック実行: {params['method']}={params['value']}")
+    do_click(params["method"], params["value"], target)
 
-    return {
-        "scenario.last_click": "ok"
-    }
+    return { "result": "ok" }
 ```
+
+シナリオ JSON はポートを実際のシナリオ変数に繋ぐ:
+
+```jsonc
+{
+  "nodeId": "desktop/click",
+  "params": { "method": "xpath", "value": "//Button[@Name='OK']", "timeout": 5 },
+  "bindings": {
+    "target": "scenario.main_window",
+    "result": "scenario.last_click"
+  }
+}
+```
+
+### なぜポートか (原案からの変更理由)
+
+原案の `inputs=["scenario.target"]` は、ノード実装がシナリオ変数名に直接結びついていた。
+同じクリックノードを `scenario.main_window` を参照する別シナリオで使うのに書き換え必須になる。
+
+ポート/バインディングに分けると:
+
+1. **ノードが pure** — `scenario.*` の命名を知らない。同じノードを複数シナリオで使い回せる
+2. **Inspector が自動で wiring UI を生成** — ポート定義を読むだけでフォームが書ける
+3. **型チェック** — 編集時に ports の type とバインド先の実値型を検査できる
+4. **グラフが意味を持つ** — 将来ブロック同士のポート直結 (変数を介さない) にも拡張可能
+
+これは Blender / Houdini / n8n / ComfyUI / Unreal Blueprints が共通して採用するパターン。
 
 ### `run()` の引数
 
 | 引数 | 型 | 説明 |
 |---|---|---|
-| `inputs` | `dict[str, Any]` | デコレータの `inputs` で宣言した変数の値を engine が事前取得して渡す |
+| `ports` | `dict[str, Any]` | 宣言した in ポートの値 (engine がバインディング経由で解決済み) |
 | `params` | `dict[str, Any]` | JSON の `params` がデコレータのデフォルトを上書きした結果 |
 | `ctx` | `NodeContext` | `ctx.log()` / `ctx.track_id` / `ctx.block_id` / `ctx.cancelled` などを提供 |
 
-戻り値は `dict[str, Any]`。**デコレータの `outputs` で宣言したキーだけ** が
-engine に反映される（それ以外は無視されて警告ログが出る）。
-
-### 旧 `flow.pull` / `flow.push` との対比
-
-原案では WinActor の `!var!` / `$var$` に倣った `flow.pull` / `flow.push` API だったが、
-以下の理由で **inputs / outputs 辞書を引数で受ける関数型** に変更した:
-
-1. **IPC 往復を 1 回に圧縮** — pull/push を関数呼び出しで実装すると、ノード実行中に
-   engine と何度もラウンドトリップが発生する。宣言ベースなら 1 回で済む
-2. **静的解析が可能** — 実行前に「このノードはどの変数を読み書きするか」が分かるので、
-   デバッグ・依存関係検出・ドキュメント生成ができる
-3. **デグレード時の挙動が明確** — 宣言にない変数を読もうとしたらエラー（黙って失敗しない）
-4. **RPA ノードは大半が pure function** — 可変代入の柔軟性はほぼ不要
-
-WinActor 互換の書き心地が欲しい場合は、将来のオプションとして `flow.pull` / `flow.push`
-を **宣言を自動で推論する糖衣構文** として再導入する余地はある。
+戻り値は `dict[str, Any]`。**デコレータで宣言した out ポートのキーだけ** が engine に反映される
+(宣言外のキーは警告ログ付きで無視される)。
 
 ### ログとキャンセル検知
 
 ```python
-def run(inputs, params, ctx):
+def run(ports, params, ctx):
     for i in range(100):
         if ctx.cancelled:
             return {}     # 早期リターンで協調キャンセル
@@ -216,6 +276,23 @@ def run(inputs, params, ctx):
 
 `ctx.cancelled` は **abort シグナルを受けてキャンセル中** であることを示す。
 ループ内でチェックすれば、ワーカープロセスが SIGKILL される前にきれいに抜けられる。
+
+### stdlib `logging` の自動ブリッジ
+
+ノード作者は何もしなくていい。`run()` の実行中だけ Python 標準 `logging` の root logger に
+ハンドラが挿入され、ライブラリが吐くログが `ctx.log()` 経由で ExecutionLogPanel に流れる。
+
+```python
+import requests
+
+def run(ports, params, ctx):
+    # requests の内部 DEBUG ログも自動で ExecutionLogPanel に表示される
+    r = requests.get(ports["url"])
+    return { "body": r.text }
+```
+
+`logging` のレベル (`DEBUG`/`INFO`/`WARNING`/`ERROR`) は FLOWLINE の `info`/`warn`/`error` に
+マッピングされる。ブリッジは `run()` が抜けた瞬間に解除される。
 
 ---
 
@@ -352,25 +429,47 @@ _runtime/
 
 ### ID 衝突時の扱い
 
-- 同じ `id` を持つノードが複数あった場合は **後から import された方が勝つ**
-  ＋ 警告ログを出す
-- 将来的には `@node(id=..., version=...)` で複数バージョン共存を検討
+原則: **同じ `id` のノードを複数登録するとロード時にハードエラー**。順序依存の無言バグを
+避けるため、last-wins は採用しない。
+
+唯一の例外は **明示的なオーバーライド**:
+
+```python
+@node(id="desktop/click", overrides=True, ...)
+def run(...): ...
+```
+
+`overrides=True` を宣言したノードは既存の同 ID ノードを**意図的に置き換える**。
+`_runtime/nodes/custom/` に置いた社内版 `desktop/click` で built-in を差し替える、といった
+正規フローに使う。2 枚の `overrides=True` が同じ ID に当たる場合も、やはりエラー。
+
+将来的には `@node(id=..., version=...)` で複数バージョン共存を検討。
 
 ---
 
-## 変数スコープと IPC
+## 変数スコープ (バインディング先)
+
+シナリオ JSON の `bindings` は、ポートを以下のいずれかの変数キーに繋げる:
 
 | スコープ | キー例 | 生存範囲 |
 |---|---|---|
 | `scenario` | `scenario.result_data` | シナリオ全体、トラック間で engine 経由で同期 |
-| `track` | `track.loop_index` | そのトラック内（ワーカー内メモリ） |
-| `block` | （内部処理のみ） | ユーザー非公開 |
+| `track` | `track.loop_index` | そのトラック内 (engine 側で track ごとに保持) |
+| `block` | (内部処理のみ) | ユーザー非公開 |
+
+### 変数ストアは engine 所有
+
+ワーカー内にはシナリオ変数を持たない。engine (TypeScript) が全変数の唯一の真実とする:
+
+1. `run_node` 送信時に、engine がバインディングを解決し in ポートの値を `ports: {...}` に詰める
+2. ワーカーは `run()` を実行、out ポートを `outputs: {...}` に詰めて返す
+3. engine が `outputs` のキーをバインディング経由でシナリオ変数に反映
 
 ### 書き込み可視性
 
 - `scenario.*` への書き込みは **ブロック実行完了時に engine に反映** される
 - 他のトラックからは **次にそのブロックが engine に問い合わせた時に見える**
-- **同時刻の並列書き込みは last-write-wins**（決定論性はユーザー側で sync point を使って保証する）
+- **同時刻の並列書き込みは last-write-wins** (決定論性はユーザー側で sync point を使って保証する)
 
 ---
 
@@ -378,10 +477,54 @@ _runtime/
 
 詳細は `02-error-handling.md` 参照。ノード設計から見た要点:
 
-- デコレータの `onError` は **デフォルト**、JSON で上書き可能
-- `skipIfMissing` はデコレータでも JSON でも指定できる
-- `retry(n)` のリトライ間隔は 1 秒固定（将来はパラメータ化）
-- エラー処理トラック内のノードは `onError: abort` を強制的に `skip` に変換
+- **ポリシーは engine の専権**: ワーカーは `ok: false` + `error: {...}` を返すだけ。
+  abort / skip / ignore / retry の判定は engine が実施
+- デコレータの `onError` は **デフォルト値**、JSON で上書き可能
+- `skipIfMissing` はデコレータでも JSON でも指定できる。ワーカーは `missing: true` を返す
+  ことで engine に「ターゲット不在」を伝える (engine 側で skipIfMissing 判定)
+- `retry(n)` は engine がもう一度 `run_node` を投げ直して実装する。リトライ間隔は
+  1 秒固定 (将来はパラメータ化)
+- エラー処理トラック内のノードは `onError: abort` を engine 側で強制的に `skip` に変換
+
+---
+
+## 式言語 (loop / branch の条件)
+
+built-in の loop / branch は条件式を受け取る。安全性とシナリオ作者の書きやすさを両立するため、
+**[JSON Logic](https://jsonlogic.com/)** を採用する。
+
+```jsonc
+{
+  "nodeId": "loop",
+  "params": {
+    "condition": { "<": [ { "var": "scenario.count" }, 10 ] },
+    "body":      [ /* ブロックの並び */ ]
+  }
+}
+```
+
+```jsonc
+{
+  "nodeId": "branch",
+  "params": {
+    "condition": { "==": [ { "var": "scenario.status" }, "ok" ] },
+    "then":      [ /* ... */ ],
+    "else":      [ /* ... */ ]
+  }
+}
+```
+
+**採用理由:**
+
+- **GUI で組み立てやすい** — ネスト JSON なので dropdown ベースの条件エディタが自作しやすい
+- **diff レビュー可能** — エクスポートされたシナリオ JSON で条件の差分が読める
+- **`eval` 的危険ゼロ** — パーサが JSON 構造しか解釈しない、任意コード実行の面が存在しない
+- **変数参照が明示的** — `{ "var": "scenario.count" }` で変数と定数が構文上区別される
+
+engine 側では [`json-logic-js`](https://www.npmjs.com/package/json-logic-js) を採用予定。
+式言語として不足する場面が出てきたら、カスタム演算子を追加する方向で拡張する。
+
+Inspector には将来「条件式ビルダ」を統合 (Phase 2b)。それまではプレーンな JSON テキストエリアで受ける。
 
 ---
 
@@ -489,18 +632,33 @@ FLOWLINE の挙動:
 
 ## Phase 2 実装タスク
 
-- [ ] engine.py: トラックごとに Python ワーカーを spawn
-- [ ] worker.py: 起動時にノードレジストリを構築、JSON ライン IPC を待つ
-- [ ] `@node` デコレータとレジストリ
-- [ ] `NodeContext`（log / cancelled / track_id / block_id）
-- [ ] inputs / outputs の宣言ベース解決
-- [ ] built-in ノード（loop / branch / sync / subroutine）の engine 側実装
-- [ ] デフォルト desktop ノード 10 個を実装
-- [ ] デフォルト file ノード 6 個を実装
+### Python 側 (worker)
+- [x] `@node` デコレータ・`NodeSpec`・`REGISTRY`
+- [x] `NodeContext` (log / cancelled / track_id / block_id)
+- [x] worker.py: JSON ライン IPC ループ、ready/run_node/cancel/shutdown
+- [ ] `ports` ベースの `run(ports, params, ctx)` 署名切替
+- [ ] ID 衝突のハードエラー + `overrides=True`
+- [ ] stdlib `logging` → `ctx.log()` の自動ブリッジ
+- [ ] `reset` コマンド (track-scope 変数クリア)
+- [ ] out ポートのホワイトリスト絞り込み + 宣言外警告
+
+### Electron 側 (engine orchestrator, TS)
+- [ ] `src/main/pythonWorker.ts`: 常駐ワーカープール (lazy spawn / アイドル 5 分 / reset)
+- [ ] `src/app/engine/ipcRuntime.ts`: MockRuntime と同インターフェースの実 Python ランタイム
+- [ ] `useExecution` のランタイム自動選択 (Python 在/不在)
+- [ ] バインディング解決: ports と scenario/track 変数ストアの入出力
+- [ ] built-in: `loop` / `branch` / `sync` / `subroutine` を engine 内で実装
+- [ ] 式言語: `json-logic-js` で loop/branch 条件評価
+- [ ] エラーポリシー: abort / skip / ignore / retry(n) の適用
+- [ ] `missing: true` + `skipIfMissing` のハンドリング
+- [ ] エラー処理トラック専用ワーカーの起動ロジック + `onError: abort → skip` 強制変換
 - [ ] SIGTERM / SIGKILL によるキャンセル伝播
-- [ ] `scenario.error.*` のセット
-- [ ] エラー処理トラック専用ワーカーの起動ロジック
-- [ ] `skipIfMissing` のターゲット存在チェック
+
+### ノード本体
+- [ ] `_runtime/nodes/debug/log.py`: 動作確認用最小ノード
+- [ ] デフォルト desktop ノード 11 個
+- [ ] デフォルト file ノード 6 個
+- [ ] (cloud カテゴリは Phase 3 以降)
 
 ## Phase 4 実装タスク（配布）
 
