@@ -8,6 +8,14 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   /** Current scenario-scope variables keyed by flat name (no prefix). */
   variables: Record<string, unknown>;
+  /**
+   * Live snapshot from the executor. Keys are prefixed
+   * (`scenario.x`, `track.<id>.loop_index`, etc.). Empty between
+   * runs — when non-empty the modal shows a read-only "実行中" panel
+   * alongside the editable definitions so the user can see what
+   * each variable currently evaluates to.
+   */
+  runtimeSnapshot?: Record<string, unknown>;
   onSet: (key: string, value: unknown) => void;
   onRename: (oldKey: string, newKey: string) => void;
   onDelete: (key: string) => void;
@@ -32,6 +40,7 @@ export function VariablesModal({
   open,
   onOpenChange,
   variables,
+  runtimeSnapshot,
   onSet,
   onRename,
   onDelete,
@@ -40,6 +49,17 @@ export function VariablesModal({
     () => Object.entries(variables).sort(([a], [b]) => a.localeCompare(b)),
     [variables],
   );
+  // Runtime entries that aren't defined in the editable store are
+  // usually track-scope (e.g. ``track.<id>.loop_index``). We show
+  // them in a separate read-only panel so the user can debug what
+  // the executor sees without accidentally editing them into the
+  // persistent scenario.
+  const runtimeEntries = useMemo(() => {
+    if (!runtimeSnapshot) return [];
+    return Object.entries(runtimeSnapshot).sort(([a], [b]) =>
+      a.localeCompare(b),
+    );
+  }, [runtimeSnapshot]);
 
   const [draftKey, setDraftKey] = useState('');
   const [draftValue, setDraftValue] = useState('');
@@ -76,7 +96,7 @@ export function VariablesModal({
           </Dialog.Description>
 
           {/* Existing rows */}
-          <div className="fl-scroll mb-4 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto rounded-lg border border-fl-border bg-fl-panel-2 p-2">
+          <div className="fl-scroll mb-3 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto rounded-lg border border-fl-border bg-fl-panel-2 p-2">
             {entries.length === 0 ? (
               <div className="py-6 text-center font-mono text-[10px] text-fl-text-ghost">
                 まだ変数が定義されていません
@@ -87,6 +107,7 @@ export function VariablesModal({
                   key={key}
                   name={key}
                   value={value}
+                  runtimeValue={runtimeSnapshot?.[`scenario.${key}`]}
                   onRename={(next) => onRename(key, next)}
                   onValueChange={(next) => onSet(key, next)}
                   onDelete={() => onDelete(key)}
@@ -94,6 +115,39 @@ export function VariablesModal({
               ))
             )}
           </div>
+
+          {runtimeEntries.length > 0 && (
+            <div className="mb-4 rounded-lg border border-fl-border bg-fl-panel-2 p-2">
+              <div className="mb-1.5 flex items-center gap-1 font-mono text-[9px] tracking-wider text-fl-text-faint">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#22c55e]" />
+                実行中スナップショット ({runtimeEntries.length})
+              </div>
+              <div className="flex max-h-[140px] flex-col gap-0.5 overflow-y-auto">
+                {runtimeEntries.map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="flex items-center gap-2 rounded bg-fl-bg px-1.5 py-0.5"
+                  >
+                    <span
+                      className="min-w-0 flex-1 truncate font-mono text-[9px] text-fl-text-dim"
+                      title={key}
+                    >
+                      {key}
+                    </span>
+                    <span
+                      className="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-fl-text"
+                      title={String(value)}
+                    >
+                      {formatLiteral(value) || '""'}
+                    </span>
+                    <span className="w-10 text-right font-mono text-[8px] text-fl-text-ghost">
+                      {describeType(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* New row form */}
           <div className="rounded-lg border border-dashed border-fl-border-strong bg-fl-panel-2 p-3">
@@ -159,6 +213,8 @@ export function VariablesModal({
 interface RowProps {
   name: string;
   value: unknown;
+  /** Optional live value from the executor's snapshot. */
+  runtimeValue?: unknown;
   onRename: (next: string) => void;
   onValueChange: (next: unknown) => void;
   onDelete: () => void;
@@ -167,6 +223,7 @@ interface RowProps {
 function VariableRow({
   name,
   value,
+  runtimeValue,
   onRename,
   onValueChange,
   onDelete,
@@ -230,6 +287,16 @@ function VariableRow({
       >
         {previewType}
       </span>
+      {runtimeValue !== undefined &&
+        formatLiteral(runtimeValue) !== formatLiteral(value) && (
+          <span
+            className="flex-shrink-0 truncate rounded bg-[#22c55e18] px-1 py-0.5 font-mono text-[8px] text-[#22c55e]"
+            style={{ maxWidth: 80 }}
+            title={`実行中の現在値: ${formatLiteral(runtimeValue)}`}
+          >
+            → {formatLiteral(runtimeValue)}
+          </span>
+        )}
       <button
         type="button"
         onClick={onDelete}

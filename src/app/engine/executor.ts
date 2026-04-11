@@ -82,6 +82,7 @@ export class Executor {
       status: {},
       currentSlot: {},
       logs: [],
+      variables: {},
     };
     this.variables = new Map<string, unknown>();
     for (const [key, value] of Object.entries(scenario.variables.scenario)) {
@@ -278,12 +279,20 @@ export class Executor {
   }
 
   /**
-   * Execute a loop block's body. Iteration count comes from
-   * ``params.iterations`` (defaults to 1). Body execution stops early
-   * on abort or on a child that escalated to error. The loop block
-   * itself is marked ``running`` across all iterations, then ``ok``
-   * or ``error`` at the end — individual child statuses flash
-   * through on each iteration.
+   * Execute a loop block's body. Two modes are supported:
+   *
+   * - **Fixed count** — ``params.iterations`` runs the body N times
+   *   (default 1). Simple counter loops, most scenarios.
+   * - **While condition** — ``params.whileCondition`` is a JSON
+   *   Logic expression re-evaluated before each iteration. The body
+   *   runs while the expression is truthy. We cap the loop at
+   *   ``LOOP_MAX`` iterations so a broken condition can't hang the
+   *   scenario.
+   *
+   * ``whileCondition`` takes precedence when both are set. Body
+   * execution stops early on abort or on a child that escalated to
+   * error. The loop block itself is marked ``running`` across all
+   * iterations, then ``ok`` / ``error`` / ``cancelled`` at the end.
    */
   private async executeLoop(
     containerId: string,
@@ -291,32 +300,75 @@ export class Executor {
     loopBlock: Block,
     opts: { isErrorHandler: boolean },
   ): Promise<void> {
-    const rawIterations = (loopBlock.params as Record<string, unknown>)
-      ?.iterations;
+    const LOOP_MAX = 10_000;
+    const params = (loopBlock.params as Record<string, unknown>) ?? {};
+    const whileCondition =
+      params.whileCondition !== undefined ? params.whileCondition : null;
+    const rawIterations = params.iterations;
     const iterations =
       typeof rawIterations === 'number' && rawIterations > 0
         ? Math.floor(rawIterations)
         : 1;
 
     this.state.status[loopBlock.id] = 'running';
-    this.log(
-      'info',
-      containerId,
-      loopBlock.id,
-      `ループ開始 (${iterations} 回)`,
-    );
+    if (whileCondition !== null) {
+      this.log(
+        'info',
+        containerId,
+        loopBlock.id,
+        `ループ開始 (条件式、最大 ${LOOP_MAX} 回)`,
+      );
+    } else {
+      this.log(
+        'info',
+        containerId,
+        loopBlock.id,
+        `ループ開始 (${iterations} 回)`,
+      );
+    }
     this.flush();
 
     const children = this.childrenOf(trackBlocks, loopBlock.id);
+    const evalVars = {
+      getVariable: (key: string) => this.variables.get(key),
+      onWarn: (msg: string) =>
+        this.log('warn', containerId, loopBlock.id, `条件式: ${msg}`),
+    };
 
     let failed = false;
-    for (let i = 0; i < iterations; i++) {
+    let i = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
       if (this.aborted) break;
-      if (iterations > 1) {
-        this.log('info', containerId, loopBlock.id, `反復 ${i + 1}/${iterations}`);
+
+      // Stopping condition depends on mode.
+      if (whileCondition !== null) {
+        if (!evalBool(whileCondition, evalVars)) break;
+        if (i >= LOOP_MAX) {
+          this.log(
+            'warn',
+            containerId,
+            loopBlock.id,
+            `ループ上限 ${LOOP_MAX} 回に到達、打ち切り`,
+          );
+          break;
+        }
+      } else {
+        if (i >= iterations) break;
+      }
+
+      if (whileCondition !== null || iterations > 1) {
+        this.log(
+          'info',
+          containerId,
+          loopBlock.id,
+          whileCondition !== null
+            ? `反復 ${i + 1} (条件式)`
+            : `反復 ${i + 1}/${iterations}`,
+        );
       }
       // Seed the iteration index as a track-scope variable so child
-      // blocks can read it via bindings like ``track.loop_index``.
+      // blocks can read it via bindings like ``track.<id>.loop_index``.
       this.variables.set(`track.${containerId}.loop_index`, i);
       for (const child of children) {
         if (this.aborted) break;
@@ -327,6 +379,7 @@ export class Executor {
         }
       }
       if (failed) break;
+      i++;
     }
 
     if (this.aborted) {
@@ -668,11 +721,18 @@ export class Executor {
 
   private flush(): void {
     this.notifyWaiters();
+    // Materialise the mutable variable store into a plain object
+    // for the snapshot. Done inside flush so subscribers always see
+    // the latest values — the VariablesModal reads this when the
+    // user opens it mid-run.
+    const variables: Record<string, unknown> = {};
+    for (const [k, v] of this.variables) variables[k] = v;
     this.hooks.onStateChange({
       ...this.state,
       status: { ...this.state.status },
       currentSlot: { ...this.state.currentSlot },
       logs: this.state.logs.slice(),
+      variables,
     });
   }
 }

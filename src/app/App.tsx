@@ -978,6 +978,7 @@ export default function App() {
         open={variablesOpen}
         onOpenChange={setVariablesOpen}
         variables={scenario.variables.scenario}
+        runtimeSnapshot={execution.state.variables}
         onSet={store.setVariable}
         onRename={store.renameVariable}
         onDelete={store.deleteVariable}

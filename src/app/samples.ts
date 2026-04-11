@@ -118,6 +118,124 @@ const parallel: Scenario = {
   subroutines: [],
 };
 
+/**
+ * Control-flow showcase: demonstrates loops (fixed-count and
+ * while), branches with both then/else sides, and nested
+ * containers. Every child block uses parentBlockId so the visual
+ * frames light up as soon as the scenario loads.
+ */
+const controlFlow: Scenario = {
+  version: '1.0',
+  name: 'ループ & 分岐デモ',
+  variables: {
+    scenario: {
+      retries: 0,
+      max_retries: 3,
+      ready: false,
+    },
+  },
+  tracks: [
+    {
+      id: 'track-1',
+      name: 'メイン',
+      color: '#3B82F6',
+      blocks: [
+        {
+          id: 'b-setup',
+          type: 'action',
+          label: '初期化',
+          slot: 0,
+          deps: [],
+        },
+        // Fixed-count loop: runs body 3 times.
+        {
+          id: 'b-loop1',
+          type: 'loop',
+          label: '3 回くり返し',
+          slot: 1,
+          deps: ['b-setup'],
+          params: { iterations: 3 },
+        },
+        {
+          id: 'b-loop1-work',
+          type: 'action',
+          label: 'ワーク',
+          slot: 2,
+          deps: [],
+          parentBlockId: 'b-loop1',
+        },
+        // Branch on whether the retry counter is still below the cap.
+        {
+          id: 'b-branch',
+          type: 'branch',
+          label: 'retries < max?',
+          slot: 4,
+          deps: ['b-loop1'],
+          params: {
+            condition: {
+              '<': [
+                { var: 'scenario.retries' },
+                { var: 'scenario.max_retries' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'b-then',
+          type: 'action',
+          label: 'リトライ処理',
+          slot: 5,
+          deps: [],
+          parentBlockId: 'b-branch',
+          parentBranch: 'then',
+        },
+        {
+          id: 'b-else',
+          type: 'action',
+          label: '諦めて通知',
+          slot: 6,
+          deps: [],
+          parentBlockId: 'b-branch',
+          parentBranch: 'else',
+        },
+        // While loop: runs body while ``track.track-1.loop_index``
+        // is still less than 2, so it executes twice then stops.
+        // The loop index auto-increments each iteration.
+        {
+          id: 'b-loop2',
+          type: 'loop',
+          label: 'ポーリング',
+          slot: 7,
+          deps: ['b-branch'],
+          params: {
+            whileCondition: {
+              '<': [{ var: 'track.track-1.loop_index' }, 2],
+            },
+          },
+        },
+        {
+          id: 'b-loop2-poll',
+          type: 'action',
+          label: 'ステータス確認',
+          slot: 8,
+          deps: [],
+          parentBlockId: 'b-loop2',
+        },
+        {
+          id: 'b-done',
+          type: 'action',
+          label: '完了通知',
+          slot: 9,
+          deps: ['b-loop2'],
+        },
+      ],
+    },
+  ],
+  syncPoints: [],
+  errorHandler: emptyErrorHandler(),
+  subroutines: [],
+};
+
 export interface Sample {
   id: string;
   label: string;
@@ -131,6 +249,12 @@ export const SAMPLES: Sample[] = [
     label: '並列処理デモ',
     description: '3トラック + 同期ポイント + skipIfMissing / retry バッジ',
     scenario: parallel,
+  },
+  {
+    id: 'control-flow',
+    label: 'ループ & 分岐デモ',
+    description: 'ループ(回数/条件)、分岐(TRUE/FALSE)、内包ブロック',
+    scenario: controlFlow,
   },
   {
     id: 'basic',

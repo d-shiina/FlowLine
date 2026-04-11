@@ -39,6 +39,14 @@ export interface ExecutionState {
   /** trackId → slot currently being executed (for per-track playhead). */
   currentSlot: Record<string, number>;
   logs: LogEntry[];
+  /**
+   * Live snapshot of every variable the executor has observed so
+   * far (both the scenario-scope seeds and transient track-scope
+   * entries like `track.<id>.loop_index`). Reset between runs. The
+   * VariablesModal uses this to show what each binding currently
+   * evaluates to during execution — read-only, for debugging.
+   */
+  variables: Record<string, unknown>;
 }
 
 export const IDLE_EXECUTION_STATE: ExecutionState = {
@@ -47,4 +55,5 @@ export const IDLE_EXECUTION_STATE: ExecutionState = {
   status: {},
   currentSlot: {},
   logs: [],
+  variables: {},
 };
