@@ -11,6 +11,7 @@ import { useScenario, uid } from './useScenario';
 import { useTheme } from './useTheme';
 import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
+import { Titlebar } from './components/Titlebar';
 import { Toolbar, type EditMode } from './components/Toolbar';
 import { Ruler } from './components/Ruler';
 import { TrackRow } from './components/TrackRow';
@@ -425,6 +426,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-fl-bg font-mono text-fl-text">
+      <Titlebar />
       <Toolbar
         mode={mode}
         onModeChange={setMode}

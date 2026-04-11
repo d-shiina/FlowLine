@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 
@@ -7,13 +7,23 @@ if (started) {
   app.quit();
 }
 
-const createWindow = () => {
-  // Create the browser window.
+const createWindow = (): BrowserWindow => {
+  // Frameless window — FLOWLINE ships its own titlebar in the Toolbar.
+  // `titleBarStyle: 'hidden'` on macOS keeps the traffic lights visible;
+  // on Windows/Linux we drop the native frame entirely.
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 800,
+    minWidth: 960,
+    minHeight: 600,
+    frame: false,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    trafficLightPosition: { x: 14, y: 14 },
+    backgroundColor: '#0b1220',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   });
 
@@ -28,7 +38,41 @@ const createWindow = () => {
 
   // Open the DevTools.
   mainWindow.webContents.openDevTools();
+
+  // Broadcast maximize/unmaximize state so the custom titlebar can swap
+  // its button icon. The renderer listens via window.flowlineWindow.
+  const emitMaximized = () => {
+    mainWindow.webContents.send(
+      'window:maximized-changed',
+      mainWindow.isMaximized(),
+    );
+  };
+  mainWindow.on('maximize', emitMaximized);
+  mainWindow.on('unmaximize', emitMaximized);
+
+  return mainWindow;
 };
+
+// Window control IPC — invoked from the custom titlebar in the renderer.
+ipcMain.handle('window:minimize', (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.minimize();
+});
+ipcMain.handle('window:toggle-maximize', (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win) return false;
+  if (win.isMaximized()) {
+    win.unmaximize();
+  } else {
+    win.maximize();
+  }
+  return win.isMaximized();
+});
+ipcMain.handle('window:close', (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.close();
+});
+ipcMain.handle('window:is-maximized', (e) => {
+  return BrowserWindow.fromWebContents(e.sender)?.isMaximized() ?? false;
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
@@ -51,6 +95,3 @@ app.on('activate', () => {
     createWindow();
   }
 });
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
