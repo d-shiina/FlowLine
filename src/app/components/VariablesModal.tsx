@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { Plus, Trash2 } from 'lucide-react';
-import { Select, type SelectOption } from './ui/Select';
+import { describeType, formatLiteral, parseLiteral } from '../valueLiteral';
 
 interface Props {
   open: boolean;
@@ -13,68 +13,20 @@ interface Props {
   onDelete: (key: string) => void;
 }
 
-type VariableType = 'string' | 'number' | 'boolean' | 'json';
-
-const TYPE_OPTIONS: SelectOption<VariableType>[] = [
-  { value: 'string', label: 'string' },
-  { value: 'number', label: 'number' },
-  { value: 'boolean', label: 'boolean' },
-  { value: 'json', label: 'json' },
-];
-
-/** Guess the editor type from an existing value. */
-function inferType(value: unknown): VariableType {
-  if (typeof value === 'string') return 'string';
-  if (typeof value === 'number') return 'number';
-  if (typeof value === 'boolean') return 'boolean';
-  return 'json';
-}
-
-/** Serialize a value to the string the editor input displays. */
-function toDisplay(value: unknown, type: VariableType): string {
-  if (value === undefined || value === null) return '';
-  if (type === 'json') {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
-}
-
-/** Parse a display string back to the runtime value. Returns `undefined` on failure. */
-function fromDisplay(raw: string, type: VariableType): unknown | undefined {
-  if (type === 'string') return raw;
-  if (type === 'number') {
-    if (raw.trim() === '') return undefined;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  if (type === 'boolean') {
-    const t = raw.trim().toLowerCase();
-    if (t === 'true') return true;
-    if (t === 'false') return false;
-    return undefined;
-  }
-  // json
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Scenario-level variable store editor.
  *
  * Lists every key in ``scenario.variables.scenario`` and lets the
- * user add, rename, retype, edit or delete entries. Values live
- * under the ``scenario.`` prefix at runtime (so a row labelled
- * ``target`` shows up in the Inspector bindings as
- * ``scenario.target``). The modal commits edits on blur / change so
- * there's no separate save button — consistent with the rest of
- * the app's live-apply feel.
+ * user add, rename, edit or delete entries. The editor is
+ * deliberately type-free: the user types the value as-is and the
+ * parser figures out whether it's a number / bool / JSON / string.
+ * A faint type badge next to the input shows how the value was
+ * interpreted so there are no surprises.
+ *
+ * Values live under the ``scenario.`` prefix at runtime (so a row
+ * labelled ``target`` shows up in the Inspector bindings as
+ * ``scenario.target``). Edits commit on blur / Enter — consistent
+ * with the rest of the app's live-apply feel.
  */
 export function VariablesModal({
   open,
@@ -90,7 +42,6 @@ export function VariablesModal({
   );
 
   const [draftKey, setDraftKey] = useState('');
-  const [draftType, setDraftType] = useState<VariableType>('string');
   const [draftValue, setDraftValue] = useState('');
   const [draftError, setDraftError] = useState<string | null>(null);
 
@@ -104,15 +55,9 @@ export function VariablesModal({
       setDraftError('同じキーが既に存在します');
       return;
     }
-    const parsed = fromDisplay(draftValue, draftType);
-    if (parsed === undefined && draftType !== 'string') {
-      setDraftError(`${draftType} として解釈できませんでした`);
-      return;
-    }
-    onSet(key, draftType === 'string' ? draftValue : parsed);
+    onSet(key, parseLiteral(draftValue));
     setDraftKey('');
     setDraftValue('');
-    setDraftType('string');
     setDraftError(null);
   };
 
@@ -126,7 +71,8 @@ export function VariablesModal({
           </Dialog.Title>
           <Dialog.Description className="mb-4 font-mono text-[10px] text-fl-text-faint">
             ノードの in / out ポートをバインドする共有ストア。ここで
-            設定した値は <span className="text-fl-text-dim">scenario.キー</span> でアクセスできます。
+            設定した値は <span className="text-fl-text-dim">scenario.キー</span>
+            &nbsp;でアクセスできます。
           </Dialog.Description>
 
           {/* Existing rows */}
@@ -167,16 +113,6 @@ export function VariablesModal({
                 placeholder="キー名 (例: target)"
                 className="min-w-0 flex-[1.2] rounded border border-fl-border-2 bg-fl-bg px-2 py-1 font-mono text-[10px] text-fl-text outline-none placeholder:text-fl-text-ghost focus:border-fl-text-dim"
               />
-              <div style={{ width: 88 }}>
-                <Select<VariableType>
-                  value={draftType}
-                  onValueChange={(t) => {
-                    setDraftType(t);
-                    setDraftError(null);
-                  }}
-                  options={TYPE_OPTIONS}
-                />
-              </div>
               <input
                 value={draftValue}
                 onChange={(e) => {
@@ -186,8 +122,8 @@ export function VariablesModal({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleAdd();
                 }}
-                placeholder={draftType === 'json' ? '{"x": 1}' : '値'}
-                className="min-w-0 flex-1 rounded border border-fl-border-2 bg-fl-bg px-2 py-1 font-mono text-[10px] text-fl-text outline-none placeholder:text-fl-text-ghost focus:border-fl-text-dim"
+                placeholder='値 (例: hello / 42 / true / {"x":1})'
+                className="min-w-0 flex-[2] rounded border border-fl-border-2 bg-fl-bg px-2 py-1 font-mono text-[10px] text-fl-text outline-none placeholder:text-fl-text-ghost focus:border-fl-text-dim"
               />
               <button
                 type="button"
@@ -236,19 +172,15 @@ function VariableRow({
   onDelete,
 }: RowProps) {
   const [localKey, setLocalKey] = useState(name);
-  const [type, setType] = useState<VariableType>(() => inferType(value));
-  const [local, setLocal] = useState<string>(() => toDisplay(value, inferType(value)));
-  const [error, setError] = useState<string | null>(null);
+  const [local, setLocal] = useState<string>(() => formatLiteral(value));
 
-  // Re-sync when the external value changes (undo/redo, scenario load).
-  // We only resync when the *name* changes so typing inside the input
-  // doesn't fight the user.
-  useKeyChangeEffect(name, () => {
+  // Resync when the external identity changes (undo/redo, scenario
+  // load, rename). We key on a combination of name + stringified
+  // value so an external value update also reflows.
+  const identityKey = `${name}::${formatLiteral(value)}`;
+  useKeyChangeEffect(identityKey, () => {
     setLocalKey(name);
-    const inferred = inferType(value);
-    setType(inferred);
-    setLocal(toDisplay(value, inferred));
-    setError(null);
+    setLocal(formatLiteral(value));
   });
 
   const commitKey = () => {
@@ -261,84 +193,51 @@ function VariableRow({
   };
 
   const commitValue = () => {
-    if (type === 'string') {
-      onValueChange(local);
-      setError(null);
-      return;
-    }
-    const parsed = fromDisplay(local, type);
-    if (parsed === undefined) {
-      setError(`${type} として解釈できません`);
-      return;
-    }
-    onValueChange(parsed);
-    setError(null);
+    onValueChange(parseLiteral(local));
   };
 
-  const retype = (next: VariableType) => {
-    setType(next);
-    // Attempt a best-effort conversion of the current display string
-    // to the new type. Falls back to the empty value on failure.
-    const parsed = fromDisplay(local, next);
-    if (parsed !== undefined) {
-      onValueChange(next === 'string' ? local : parsed);
-      setError(null);
-    } else {
-      setError(`${next} として解釈できません`);
-    }
-  };
+  // Preview the type we'd store if the user committed right now.
+  const previewType = describeType(parseLiteral(local));
 
   return (
-    <div className="group flex flex-col gap-1 rounded border border-fl-border-2 bg-fl-bg px-2 py-1.5">
-      <div className="flex items-center gap-1.5">
-        <input
-          value={localKey}
-          onChange={(e) => setLocalKey(e.target.value)}
-          onBlur={commitKey}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              (e.target as HTMLInputElement).blur();
-            }
-            if (e.key === 'Escape') {
-              setLocalKey(name);
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          className="min-w-0 flex-[1.2] bg-transparent font-mono text-[10px] text-fl-text outline-none"
-        />
-        <div style={{ width: 88 }}>
-          <Select<VariableType>
-            value={type}
-            onValueChange={retype}
-            options={TYPE_OPTIONS}
-          />
-        </div>
-        <input
-          value={local}
-          onChange={(e) => {
-            setLocal(e.target.value);
-            setError(null);
-          }}
-          onBlur={commitValue}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          className="min-w-0 flex-1 rounded border border-fl-border-2 bg-fl-panel-2 px-1.5 py-0.5 font-mono text-[10px] text-fl-text outline-none focus:border-fl-text-dim"
-        />
-        <button
-          type="button"
-          onClick={onDelete}
-          className="flex-shrink-0 text-fl-text-faint transition-colors opacity-0 group-hover:opacity-100 hover:text-red-500"
-          title="削除"
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
-      </div>
-      {error && (
-        <div className="pl-1 font-mono text-[9px] text-[#ef4444]">{error}</div>
-      )}
+    <div className="group flex items-center gap-1.5 rounded border border-fl-border-2 bg-fl-bg px-2 py-1.5">
+      <input
+        value={localKey}
+        onChange={(e) => setLocalKey(e.target.value)}
+        onBlur={commitKey}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Escape') {
+            setLocalKey(name);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        className="min-w-0 flex-[1.2] bg-transparent font-mono text-[10px] text-fl-text outline-none"
+      />
+      <input
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={commitValue}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        className="min-w-0 flex-[2] rounded border border-fl-border-2 bg-fl-panel-2 px-1.5 py-0.5 font-mono text-[10px] text-fl-text outline-none focus:border-fl-text-dim"
+      />
+      <span
+        className="flex-shrink-0 font-mono text-[8px] text-fl-text-ghost"
+        style={{ width: 42, textAlign: 'right' }}
+        title={`解釈された型: ${previewType}`}
+      >
+        {previewType}
+      </span>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="flex-shrink-0 text-fl-text-faint opacity-0 transition-all group-hover:opacity-100 hover:text-red-500"
+        title="削除"
+      >
+        <Trash2 className="h-3 w-3" />
+      </button>
     </div>
   );
 }

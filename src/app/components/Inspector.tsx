@@ -1,6 +1,8 @@
-import type { Block, OnError } from '../types';
+import { useEffect, useState } from 'react';
+import type { Block, OnError, PortBinding } from '../types';
 import { BLOCK_META } from '../types';
 import type { NodeManifestEntry, NodePortDef } from '../../globals';
+import { formatLiteral, parseLiteral } from '../valueLiteral';
 import { Select, type SelectOption } from './ui/Select';
 import { Checkbox } from './ui/Checkbox';
 
@@ -13,6 +15,10 @@ interface Props {
   resolveDepLabel: (depId: string) => string;
   /** Node manifest from the Python worker. Empty when worker not up. */
   nodeManifest: NodeManifestEntry[];
+  /** Current scenario-scope variables (for the var picker). */
+  scenarioVariables: Record<string, unknown>;
+  /** Called when the user creates a new variable via the out-port helper. */
+  onCreateVariable: (key: string, value: unknown) => void;
   onChange: (trackId: string, blockId: string, patch: Partial<Block>) => void;
   onRemoveDep: (trackId: string, blockId: string, depId: string) => void;
   onClose: () => void;
@@ -51,6 +57,8 @@ export function Inspector({
   linkMode,
   resolveDepLabel,
   nodeManifest,
+  scenarioVariables,
+  onCreateVariable,
   onChange,
   onRemoveDep,
   onClose,
@@ -101,11 +109,17 @@ export function Inspector({
     });
   };
 
-  const handleBindingChange = (portName: string, varKey: string): void => {
+  const handleBindingChange = (
+    portName: string,
+    binding: PortBinding | undefined,
+  ): void => {
     if (!trackId) return;
-    const next = { ...(block.bindings ?? {}) };
-    if (varKey.trim() === '') delete next[portName];
-    else next[portName] = varKey.trim();
+    const next: Record<string, PortBinding> = { ...(block.bindings ?? {}) };
+    if (binding === undefined) {
+      delete next[portName];
+    } else {
+      next[portName] = binding;
+    }
     onChange(trackId, block.id, {
       bindings: Object.keys(next).length > 0 ? next : undefined,
     });
@@ -217,7 +231,9 @@ export function Inspector({
         <NodePortsSection
           node={selectedNode}
           bindings={block.bindings ?? {}}
+          scenarioVariables={scenarioVariables}
           onBindingChange={handleBindingChange}
+          onCreateVariable={onCreateVariable}
         />
       )}
 
@@ -378,21 +394,32 @@ export function Inspector({
 
 interface PortsSectionProps {
   node: NodeManifestEntry;
-  bindings: Record<string, string>;
-  onBindingChange: (portName: string, varKey: string) => void;
+  bindings: Record<string, PortBinding>;
+  scenarioVariables: Record<string, unknown>;
+  onBindingChange: (portName: string, binding: PortBinding | undefined) => void;
+  onCreateVariable: (key: string, value: unknown) => void;
 }
 
 /**
  * Ports panel: lists each in / out port the selected node declares
- * and lets the user bind it to a scenario-wide variable path like
- * `scenario.target`. In-ports are resolved before run_node by
- * IpcRuntime; out-ports are reflected back into the variable store
- * after the result returns. See docs/03-nodes.md (rev2).
+ * and lets the user either bind it to a scenario variable (picker
+ * + create-missing helper) or drop a literal value directly on the
+ * block. See docs/03-nodes.md (rev2).
+ *
+ * In-ports: toggle between "変数" and "値" modes. Var mode shows
+ * the scenario-var picker + a "+ 作成" shortcut for names that
+ * don't exist yet. Literal mode shows a type-agnostic text input
+ * parsed with valueLiteral.parseLiteral.
+ *
+ * Out-ports: always var-bound (literal output makes no sense), so
+ * we only render the picker + create helper.
  */
 function NodePortsSection({
   node,
   bindings,
+  scenarioVariables,
   onBindingChange,
+  onCreateVariable,
 }: PortsSectionProps) {
   const portEntries = Object.entries(node.ports);
   if (portEntries.length === 0) {
@@ -408,20 +435,19 @@ function NodePortsSection({
   return (
     <div className="flex flex-col gap-1">
       <span className="font-mono text-[9px] text-fl-text-faint">PORTS</span>
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2">
         {portEntries.map(([portName, def]) => (
           <PortRow
             key={portName}
             name={portName}
             def={def}
-            value={bindings[portName] ?? ''}
-            onChange={(v) => onBindingChange(portName, v)}
+            binding={bindings[portName]}
+            scenarioVariables={scenarioVariables}
+            onChange={(next) => onBindingChange(portName, next)}
+            onCreateVariable={onCreateVariable}
           />
         ))}
       </div>
-      <span className="font-mono text-[8px] leading-relaxed text-fl-text-ghost">
-        例: scenario.target / track.loop_index
-      </span>
     </div>
   );
 }
@@ -429,37 +455,283 @@ function NodePortsSection({
 interface PortRowProps {
   name: string;
   def: NodePortDef;
-  value: string;
-  onChange: (next: string) => void;
+  binding: PortBinding | undefined;
+  scenarioVariables: Record<string, unknown>;
+  onChange: (next: PortBinding | undefined) => void;
+  onCreateVariable: (key: string, value: unknown) => void;
 }
 
-function PortRow({ name, def, value, onChange }: PortRowProps) {
+function PortRow({
+  name,
+  def,
+  binding,
+  scenarioVariables,
+  onChange,
+  onCreateVariable,
+}: PortRowProps) {
   const kindColor = def.kind === 'in' ? '#60a5fa' : '#22c55e';
   const kindLabel = def.kind === 'in' ? '←' : '→';
-  return (
+
+  // Header (arrow + port name + type hint)
+  const header = (
     <div className="flex items-center gap-1.5">
       <span
-        className="flex-shrink-0 font-mono text-[9px] font-bold"
-        style={{ color: kindColor, width: 10 }}
+        className="flex-shrink-0 font-mono text-[10px] font-bold"
+        style={{ color: kindColor }}
         title={def.kind === 'in' ? '入力ポート' : '出力ポート'}
       >
         {kindLabel}
       </span>
       <span
-        className="flex-shrink-0 truncate font-mono text-[10px] text-fl-text-dim"
-        style={{ width: 64 }}
+        className="flex-1 truncate font-mono text-[10px] text-fl-text-dim"
         title={`${name}${def.type ? ` : ${def.type}` : ''}${def.required ? ' *' : ''}`}
       >
         {name}
         {def.required && <span className="text-[#f59e0b]">*</span>}
       </span>
+      {def.type && (
+        <span className="flex-shrink-0 font-mono text-[8px] text-fl-text-ghost">
+          {def.type}
+        </span>
+      )}
+    </div>
+  );
+
+  // Out-ports: var-only editor
+  if (def.kind === 'out') {
+    return (
+      <div className="flex flex-col gap-1">
+        {header}
+        <VariableField
+          value={binding?.kind === 'var' ? binding.key : ''}
+          scenarioVariables={scenarioVariables}
+          onCommit={(key) =>
+            onChange(key ? { kind: 'var', key } : undefined)
+          }
+          onCreateVariable={onCreateVariable}
+        />
+      </div>
+    );
+  }
+
+  // In-ports: var / literal toggle + type-appropriate editor
+  const mode: 'var' | 'literal' = binding?.kind ?? 'var';
+  const switchMode = (next: 'var' | 'literal') => {
+    if (next === mode) return;
+    if (next === 'var') {
+      onChange({ kind: 'var', key: '' });
+    } else {
+      onChange({ kind: 'literal', value: '' });
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      {header}
+      <div className="flex items-center gap-1">
+        <ModeToggle mode={mode} onChange={switchMode} />
+        <div className="min-w-0 flex-1">
+          {mode === 'var' ? (
+            <VariableField
+              value={binding?.kind === 'var' ? binding.key : ''}
+              scenarioVariables={scenarioVariables}
+              onCommit={(key) =>
+                onChange(key ? { kind: 'var', key } : undefined)
+              }
+              onCreateVariable={onCreateVariable}
+            />
+          ) : (
+            <LiteralField
+              value={binding?.kind === 'literal' ? binding.value : undefined}
+              onCommit={(value) => onChange({ kind: 'literal', value })}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Mode toggle ──────────────────────────────────────────────────
+
+interface ModeToggleProps {
+  mode: 'var' | 'literal';
+  onChange: (next: 'var' | 'literal') => void;
+}
+
+function ModeToggle({ mode, onChange }: ModeToggleProps) {
+  const btnCls =
+    'px-1.5 py-0.5 font-mono text-[9px] transition-colors';
+  return (
+    <div className="flex flex-shrink-0 overflow-hidden rounded border border-fl-border-2">
+      <button
+        type="button"
+        onClick={() => onChange('var')}
+        className={btnCls}
+        style={{
+          background: mode === 'var' ? '#3b82f622' : 'transparent',
+          color:
+            mode === 'var' ? '#60a5fa' : 'var(--fl-text-ghost)',
+        }}
+        title="シナリオ変数を参照"
+      >
+        変数
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange('literal')}
+        className={btnCls}
+        style={{
+          background: mode === 'literal' ? '#3b82f622' : 'transparent',
+          color:
+            mode === 'literal' ? '#60a5fa' : 'var(--fl-text-ghost)',
+        }}
+        title="値を直接指定"
+      >
+        値
+      </button>
+    </div>
+  );
+}
+
+// ── Variable field (picker + create helper) ─────────────────────
+
+interface VariableFieldProps {
+  value: string;
+  scenarioVariables: Record<string, unknown>;
+  onCommit: (key: string) => void;
+  onCreateVariable: (key: string, value: unknown) => void;
+}
+
+/**
+ * Editor for a `var`-kind binding. The user types a fully-qualified
+ * key (e.g. `scenario.target`) and the field is live-checked against
+ * the scenario variable store. If the key is a `scenario.*` name that
+ * doesn't exist yet, a "+ 作成" button appears — clicking it creates
+ * the variable with a null initial value and commits the binding.
+ *
+ * We only offer auto-create for scenario-scoped keys because track
+ * variables aren't yet surfaced in any UI.
+ */
+function VariableField({
+  value,
+  scenarioVariables,
+  onCommit,
+  onCreateVariable,
+}: VariableFieldProps) {
+  const [local, setLocal] = useState(value);
+
+  // Resync when the external binding identity changes.
+  useEffect(() => {
+    setLocal(value);
+  }, [value]);
+
+  const scenarioKey =
+    local.startsWith('scenario.') && local.length > 'scenario.'.length
+      ? local.slice('scenario.'.length)
+      : null;
+  const existsInStore =
+    scenarioKey !== null && scenarioKey in scenarioVariables;
+  const canCreate =
+    scenarioKey !== null && !existsInStore && scenarioKey.trim() !== '';
+
+  const commit = () => {
+    const trimmed = local.trim();
+    if (trimmed === value) return;
+    onCommit(trimmed);
+  };
+
+  const handleCreate = () => {
+    if (!scenarioKey) return;
+    onCreateVariable(scenarioKey, null);
+    // Commit the binding so the UI reflects the new link immediately.
+    onCommit(local.trim());
+  };
+
+  // Known variable names for the datalist (autocomplete suggestions).
+  const datalistId = `flowline-vars-${Math.abs(hashString(value || local))}`;
+
+  return (
+    <div className="flex min-w-0 items-center gap-1">
       <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="(unbound)"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Escape') {
+            setLocal(value);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        placeholder="scenario.xxx"
+        list={datalistId}
         className="min-w-0 flex-1 rounded border border-fl-border-2 bg-fl-bg px-1.5 py-0.5 font-mono text-[10px] text-fl-text outline-none placeholder:text-fl-text-ghost focus:border-fl-text-dim"
       />
+      <datalist id={datalistId}>
+        {Object.keys(scenarioVariables).map((k) => (
+          <option key={k} value={`scenario.${k}`} />
+        ))}
+      </datalist>
+      {canCreate && (
+        <button
+          type="button"
+          onClick={handleCreate}
+          className="flex-shrink-0 rounded border border-[#22c55e] bg-[#22c55e18] px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#22c55e] transition-colors hover:bg-[#22c55e30]"
+          title={`scenario.${scenarioKey} を新規作成`}
+        >
+          + 作成
+        </button>
+      )}
     </div>
+  );
+}
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+// ── Literal field ────────────────────────────────────────────────
+
+interface LiteralFieldProps {
+  value: unknown;
+  onCommit: (next: unknown) => void;
+}
+
+/**
+ * Editor for a `literal`-kind binding. Type-agnostic: the user types
+ * whatever they want and we parse it with the shared value-literal
+ * helper. The same rules that govern VariablesModal apply here so
+ * the experience is consistent (numbers, booleans, JSON, string
+ * fallback).
+ */
+function LiteralField({ value, onCommit }: LiteralFieldProps) {
+  const [local, setLocal] = useState<string>(() => formatLiteral(value));
+
+  // Resync when the external binding identity changes.
+  const valueKey = formatLiteral(value);
+  useEffect(() => {
+    setLocal(valueKey);
+  }, [valueKey]);
+
+  const commit = () => {
+    const parsed = parseLiteral(local);
+    if (parsed !== value) onCommit(parsed);
+  };
+
+  return (
+    <input
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+      }}
+      placeholder='"hello" / 42 / true / {"x":1}'
+      className="w-full rounded border border-fl-border-2 bg-fl-bg px-1.5 py-0.5 font-mono text-[10px] text-fl-text outline-none placeholder:text-fl-text-ghost focus:border-fl-text-dim"
+    />
   );
 }
 

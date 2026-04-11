@@ -28,6 +28,21 @@ export type OnError =
   | 'ignore'
   | { retry: number; then: 'abort' | 'skip' };
 
+/**
+ * One end of a port binding.
+ *
+ * - `var`     — engine resolves the value from the scenario variable
+ *               store at runtime, e.g. `scenario.target` or
+ *               `track.loop_index`. Used for both in-ports (read
+ *               before run_node) and out-ports (written after result).
+ * - `literal` — a hardcoded value stored on the block itself. Only
+ *               makes sense for in-ports; the engine forwards `value`
+ *               verbatim into the run_node payload.
+ */
+export type PortBinding =
+  | { kind: 'var'; key: string }
+  | { kind: 'literal'; value: unknown };
+
 export interface Block {
   id: string;
   type: BlockType;
@@ -41,14 +56,15 @@ export interface Block {
   /** Free-form node parameters. Overrides node decorator defaults. */
   params?: Record<string, unknown>;
   /**
-   * Port-to-variable bindings. Maps a node's port name (declared on the
-   * Python decorator's `ports={...}`) to a scenario-variable path like
-   * `"scenario.target"` or `"track.loop_index"`. The engine resolves
-   * in-ports before sending `run_node` to the worker, and reflects
-   * out-ports back into the variable store after the result returns.
-   * See docs/03-nodes.md (rev2).
+   * Port bindings. Key is the node's port name as declared on its
+   * Python ``@node(ports=...)`` decorator; value is either a
+   * scenario-variable reference or a hardcoded literal. In-ports
+   * are resolved before ``run_node`` on the engine side; out-ports
+   * reflect back into the variable store after the worker result
+   * (only ``var`` bindings are written back). See docs/03-nodes.md
+   * (rev2).
    */
-  bindings?: Record<string, string>;
+  bindings?: Record<string, PortBinding>;
   /** Max runtime in seconds. Undefined = engine default. */
   timeout?: number;
   /** If true, a missing target is not an error — silently skip. */

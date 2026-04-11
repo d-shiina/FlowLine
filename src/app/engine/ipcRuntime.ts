@@ -118,16 +118,22 @@ export class IpcRuntime implements Runtime {
       return this.mockFallback.run(block, ctx);
     }
 
-    // Resolve in-port bindings from the variable store. Out-ports
-    // aren't sent — we write them back once the worker returns.
+    // Resolve in-port bindings. Each binding is either a `var`
+    // reference (fetched from the executor's variable store) or a
+    // `literal` that's forwarded verbatim. Out-ports aren't sent
+    // — we write them back once the worker returns.
     const ports: Record<string, unknown> = {};
     const bindings = block.bindings ?? {};
     for (const [portName, def] of Object.entries(manifest.ports)) {
       if (def.kind !== 'in') continue;
-      const varKey = bindings[portName];
-      if (varKey === undefined) continue;
-      const value = ctx.getVariable(varKey);
-      if (value !== undefined) ports[portName] = value;
+      const binding = bindings[portName];
+      if (!binding) continue;
+      if (binding.kind === 'var') {
+        const value = ctx.getVariable(binding.key);
+        if (value !== undefined) ports[portName] = value;
+      } else {
+        ports[portName] = binding.value;
+      }
     }
 
     const reqId = `r-${++this.reqCounter}-${Date.now()}`;
@@ -171,10 +177,12 @@ export class IpcRuntime implements Runtime {
       const bindings = block.bindings ?? {};
       for (const [portName, def] of Object.entries(manifest.ports)) {
         if (def.kind !== 'out') continue;
-        const varKey = bindings[portName];
-        if (!varKey) continue;
+        const binding = bindings[portName];
+        // Literal bindings can't "receive" output — only var
+        // bindings reflect back into the store.
+        if (!binding || binding.kind !== 'var') continue;
         if (Object.prototype.hasOwnProperty.call(frame.outputs, portName)) {
-          ctx.setVariable(varKey, frame.outputs[portName]);
+          ctx.setVariable(binding.key, frame.outputs[portName]);
         }
       }
       return { ok: true };

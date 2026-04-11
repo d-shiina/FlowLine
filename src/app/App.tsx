@@ -870,6 +870,8 @@ export default function App() {
           linkMode={mode === 'link'}
           resolveDepLabel={resolveDepLabel}
           nodeManifest={nodeManifest}
+          scenarioVariables={scenario.variables.scenario}
+          onCreateVariable={store.setVariable}
           onChange={store.updateBlock}
           onRemoveDep={store.removeDep}
           onClose={() => setSelected(null)}
