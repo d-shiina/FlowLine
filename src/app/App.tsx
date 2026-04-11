@@ -239,68 +239,51 @@ export default function App() {
 
   const isErrorHandlerSelection = selected?.trackId === ERROR_HANDLER_ID;
 
-  // List the loop / branch blocks that live on the same container as
-  // the current selection so Inspector's "内包先" dropdown can offer
-  // them as nesting targets. Nested containers ARE allowed, but we
-  // walk the parent chain to exclude containers that would create
-  // a cycle (the selected block's descendants). Self is always
-  // excluded.
-  const availableContainers = useMemo(() => {
-    if (!selected) return [];
-    const findContainer = (): Block[] | null => {
-      if (selected.trackId === ERROR_HANDLER_ID) {
-        return scenario.errorHandler.blocks;
-      }
-      const t = scenario.tracks.find((x) => x.id === selected.trackId);
-      if (t) return t.blocks;
-      const sub = scenario.subroutines.find((s) => s.id === selected.trackId);
-      return sub ? sub.blocks : null;
-    };
-    const blocks = findContainer();
-    if (!blocks) return [];
-
-    // Descendants of the selected block — we can't nest into one of
-    // our own descendants without forming a cycle in the parent
-    // chain. BFS over parentBlockId links inside the same container.
-    const descendants = new Set<string>();
-    const queue = [selected.blockId];
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      for (const b of blocks) {
-        if (b.parentBlockId === id && !descendants.has(b.id)) {
-          descendants.add(b.id);
-          queue.push(b.id);
-        }
-      }
+  // Resolve the selected block's parent container (if any) so the
+  // Inspector can render a case-lane picker. The parent link
+  // itself is managed via drag-and-drop onto container frames —
+  // there's no Inspector dropdown for attaching a container
+  // anymore, which keeps the primary interaction loop in the
+  // timeline where it belongs.
+  const parentContainerInfo = useMemo<{
+    cases: string[] | null;
+    type: 'loop' | 'branch' | 'switch' | null;
+  }>(() => {
+    if (!selectedBlock || !selectedBlock.parentBlockId || !selected) {
+      return { cases: null, type: null };
     }
-
-    return blocks
-      .filter(
-        (b) =>
-          b.id !== selected.blockId &&
-          !descendants.has(b.id) &&
-          (b.type === 'loop' ||
-            b.type === 'branch' ||
-            b.type === 'switch'),
-      )
-      .map((b) => {
-        const cases: string[] =
-          b.type === 'branch'
-            ? ['then', 'else']
-            : b.type === 'switch'
-              ? Array.isArray(
-                  (b.params as Record<string, unknown> | undefined)?.cases,
-                )
-                ? (
-                    (b.params as { cases: unknown[] }).cases.map((c) =>
-                      String(c),
-                    )
-                  )
-                : []
-              : [];
-        return { id: b.id, label: b.label, type: b.type, cases };
-      });
-  }, [selected, scenario]);
+    const blocks: Block[] | null =
+      selected.trackId === ERROR_HANDLER_ID
+        ? scenario.errorHandler.blocks
+        : (scenario.tracks.find((x) => x.id === selected.trackId)?.blocks ??
+          scenario.subroutines.find((s) => s.id === selected.trackId)
+            ?.blocks ??
+          null);
+    const parent = blocks?.find(
+      (b) => b.id === selectedBlock.parentBlockId,
+    );
+    if (
+      !parent ||
+      (parent.type !== 'loop' &&
+        parent.type !== 'branch' &&
+        parent.type !== 'switch')
+    ) {
+      return { cases: null, type: null };
+    }
+    const cases: string[] =
+      parent.type === 'branch'
+        ? ['then', 'else']
+        : parent.type === 'switch'
+          ? Array.isArray(
+              (parent.params as Record<string, unknown> | undefined)?.cases,
+            )
+            ? (parent.params as { cases: unknown[] }).cases.map((c) =>
+                String(c),
+              )
+            : []
+          : [];
+    return { cases, type: parent.type };
+  }, [selectedBlock, selected, scenario]);
 
   /**
    * Resolve a dep id back to a human-readable label ("label #slot") by
@@ -957,7 +940,8 @@ export default function App() {
           resolveDepLabel={resolveDepLabel}
           nodeManifest={nodeManifest}
           scenarioVariables={scenario.variables.scenario}
-          availableContainers={availableContainers}
+          parentContainerCases={parentContainerInfo.cases}
+          parentContainerType={parentContainerInfo.type}
           onCreateVariable={store.setVariable}
           onChange={store.updateBlock}
           onRemoveDep={store.removeDep}

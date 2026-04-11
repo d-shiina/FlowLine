@@ -19,18 +19,14 @@ interface Props {
   /** Current scenario-scope variables (for the var picker). */
   scenarioVariables: Record<string, unknown>;
   /**
-   * Loop / branch / switch blocks on the same container as the
-   * selected block that it can be nested inside. For containers
-   * with multiple cases (branch / switch), ``cases`` carries the
-   * available lane labels so the Inspector can render a matching
-   * dropdown for ``parentBranch``.
+   * When the selected block has a parent container, these are
+   * the parent's case labels (``['then','else']`` for a branch,
+   * ``params.cases`` for a switch). Used by Inspector to render
+   * the lane picker. ``null`` when the selection is top-level or
+   * the parent is a loop (single body).
    */
-  availableContainers: Array<{
-    id: string;
-    label: string;
-    type: string;
-    cases: string[];
-  }>;
+  parentContainerCases: string[] | null;
+  parentContainerType: 'loop' | 'branch' | 'switch' | null;
   /** Called when the user creates a new variable via the out-port helper. */
   onCreateVariable: (key: string, value: unknown) => void;
   onChange: (trackId: string, blockId: string, patch: Partial<Block>) => void;
@@ -72,7 +68,8 @@ export function Inspector({
   resolveDepLabel,
   nodeManifest,
   scenarioVariables,
-  availableContainers,
+  parentContainerCases,
+  parentContainerType,
   onCreateVariable,
   onChange,
   onRemoveDep,
@@ -218,76 +215,35 @@ export function Inspector({
         />
       </label>
 
-      {availableContainers.length > 0 && (
+      {/* When this block is nested inside a branch / switch
+          container, let the user flip which case lane it belongs
+          to. The parent link itself is managed via drag-and-drop
+          onto a container frame — there's no explicit 内包先
+          dropdown anymore because the timeline drag UX is the
+          authoritative way to attach / detach containers. */}
+      {parentContainerCases && parentContainerCases.length > 1 && (
         <div className="flex flex-col gap-1">
           <span className="font-mono text-[9px] text-fl-text-faint">
-            内包先
+            内包レーン
           </span>
           <Select<string>
-            value={block.parentBlockId ?? ''}
-            onValueChange={(v) => {
-              if (v === '') {
-                onChange(trackId, block.id, {
-                  parentBlockId: undefined,
-                  parentBranch: undefined,
-                });
-                return;
-              }
-              // Default the case label for multi-case containers
-              // (branch / switch) to the first available lane;
-              // loops don't use parentBranch at all.
-              const target = availableContainers.find((c) => c.id === v);
-              const defaultCase =
-                target && target.cases.length > 1 ? target.cases[0] : undefined;
-              onChange(trackId, block.id, {
-                parentBlockId: v,
-                parentBranch:
-                  defaultCase === undefined
-                    ? undefined
-                    : target?.cases.includes(block.parentBranch ?? '')
-                      ? block.parentBranch
-                      : defaultCase,
-              });
-            }}
-            options={[
-              { value: '', label: '(なし)' },
-              ...availableContainers.map((c) => ({
-                value: c.id,
-                label: `${
-                  c.type === 'loop' ? '↻' : c.type === 'switch' ? '⧉' : '⑂'
-                } ${c.label}`,
-              })),
-            ]}
+            value={block.parentBranch ?? parentContainerCases[0]}
+            onValueChange={(side) =>
+              onChange(trackId, block.id, { parentBranch: side })
+            }
+            options={parentContainerCases.map((c) => ({
+              value: c,
+              label:
+                parentContainerType === 'branch'
+                  ? c === 'then'
+                    ? 'TRUE 側 (条件一致)'
+                    : 'FALSE 側 (条件不一致)'
+                  : c,
+            }))}
           />
-          {block.parentBlockId &&
-            (() => {
-              const parent = availableContainers.find(
-                (c) => c.id === block.parentBlockId,
-              );
-              if (!parent || parent.cases.length <= 1) return null;
-              return (
-                <Select<string>
-                  value={block.parentBranch ?? parent.cases[0]}
-                  onValueChange={(side) =>
-                    onChange(trackId, block.id, { parentBranch: side })
-                  }
-                  options={parent.cases.map((c) => ({
-                    value: c,
-                    label:
-                      parent.type === 'branch'
-                        ? c === 'then'
-                          ? 'TRUE 側 (条件一致)'
-                          : 'FALSE 側 (条件不一致)'
-                        : c,
-                  }))}
-                />
-              );
-            })()}
-          {block.parentBlockId && (
-            <span className="font-mono text-[8px] text-fl-text-ghost">
-              親コンテナのボディとして実行されます
-            </span>
-          )}
+          <span className="font-mono text-[8px] text-fl-text-ghost">
+            親コンテナをドラッグで変更
+          </span>
         </div>
       )}
 

@@ -135,8 +135,12 @@ export function TrackRow({
       let toSlot: number;
       let empty = false;
       if (children.length === 0) {
+        // 1-slot wide so the header anchor sits exactly at the
+        // container's own column. Growing to 2 slots used to leave
+        // an empty first cell when the user added the first child,
+        // because the click-to-add hit slot+1 instead of slot.
         fromSlot = parent.slot;
-        toSlot = parent.slot + 1;
+        toSlot = parent.slot;
         empty = true;
       } else {
         const childMin = Math.min(...children.map((c) => c.slot));
@@ -408,7 +412,9 @@ export function TrackRow({
           return (
             <div
               key={f.block.id}
-              className="pointer-events-none absolute overflow-hidden rounded-lg border-[1.5px]"
+              role="button"
+              tabIndex={0}
+              className="pointer-events-auto absolute cursor-grab overflow-hidden rounded-lg border-[1.5px] active:cursor-grabbing"
               style={{
                 left,
                 width,
@@ -426,47 +432,48 @@ export function TrackRow({
                   ? `${f.label} (空のボディ — ブロックをドロップして配置)`
                   : f.label
               }
+              onMouseDown={(e) => {
+                // The whole frame is the selection + drag target.
+                // stopPropagation keeps the click from bubbling to
+                // the track canvas (which would otherwise open the
+                // AddBlockModal for a brand-new top-level block).
+                e.stopPropagation();
+                e.preventDefault();
+                onSelectBlock(track.id, f.block.id);
+                if (!blocksDraggable) return;
+
+                const startX = e.clientX;
+                let didMove = false;
+                let delta = 0;
+                const onMove = (ev: MouseEvent) => {
+                  const raw = Math.round((ev.clientX - startX) / SLOT_PX);
+                  if (raw === delta) return;
+                  delta = raw;
+                  didMove = didMove || raw !== 0;
+                };
+                const onUp = () => {
+                  window.removeEventListener('mousemove', onMove);
+                  window.removeEventListener('mouseup', onUp);
+                  if (didMove && delta !== 0) {
+                    onMoveContainerTree(track.id, f.block.id, delta);
+                  }
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+              }}
+              // Swallow click events too — React synthesises a
+              // click after mousedown/mouseup and without this it
+              // still bubbles to the canvas onClick handler.
+              onClick={(e) => e.stopPropagation()}
             >
-              {/* Header bar — click-selectable, drag-to-move. A
-                  press-drag-release moves the container + every
-                  descendant by the rounded slot delta; a press-
-                  release without movement is treated as a plain
-                  click so the Inspector still opens on tap. */}
+              {/* Header bar (visual only — the whole frame
+                  catches mousedown, no per-element handler). */}
               <div
-                role="button"
-                tabIndex={0}
-                className="pointer-events-auto absolute left-0 right-0 top-0 flex cursor-grab items-center gap-1 px-1.5 text-left active:cursor-grabbing"
+                className="pointer-events-none absolute left-0 right-0 top-0 flex items-center gap-1 px-1.5 text-left"
                 style={{
                   height: headerH,
                   background: `${f.color}${selected || running ? '3a' : '22'}`,
                   borderBottom: `1px solid ${f.color}55`,
-                }}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  onSelectBlock(track.id, f.block.id);
-                  if (!blocksDraggable) return;
-
-                  const startX = e.clientX;
-                  let didMove = false;
-                  let delta = 0;
-                  const onMove = (ev: MouseEvent) => {
-                    const raw = Math.round(
-                      (ev.clientX - startX) / SLOT_PX,
-                    );
-                    if (raw === delta) return;
-                    delta = raw;
-                    didMove = didMove || raw !== 0;
-                  };
-                  const onUp = () => {
-                    window.removeEventListener('mousemove', onMove);
-                    window.removeEventListener('mouseup', onUp);
-                    if (didMove && delta !== 0) {
-                      onMoveContainerTree(track.id, f.block.id, delta);
-                    }
-                  };
-                  window.addEventListener('mousemove', onMove);
-                  window.addEventListener('mouseup', onUp);
                 }}
               >
                 <span
