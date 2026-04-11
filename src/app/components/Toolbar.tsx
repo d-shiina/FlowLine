@@ -1,7 +1,6 @@
 import {
   Play,
   Square,
-  Plus,
   Upload,
   Download,
   Hexagon,
@@ -22,7 +21,6 @@ interface Props {
   onModeChange: (m: EditMode) => void;
   playing: boolean;
   onTogglePlay: () => void;
-  onAddTrack: () => void;
   onImport: () => void;
   onExport: () => void;
   onSample: () => void;
@@ -41,7 +39,6 @@ export function Toolbar({
   onModeChange,
   playing,
   onTogglePlay,
-  onAddTrack,
   onImport,
   onExport,
   onSample,
@@ -135,10 +132,6 @@ export function Toolbar({
             <Hexagon className="h-3 w-3" /> 同期ポイント
           </button>
         </div>
-
-        <button type="button" onClick={onAddTrack} className={chipBase}>
-          <Plus className="h-3 w-3" /> トラック
-        </button>
 
         <button
           type="button"

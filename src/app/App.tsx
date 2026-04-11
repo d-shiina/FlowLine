@@ -432,7 +432,6 @@ export default function App() {
         onModeChange={setMode}
         playing={playing}
         onTogglePlay={togglePlay}
-        onAddTrack={store.addTrack}
         onImport={handleImport}
         onExport={handleExport}
         onSample={() => setSamplesOpen(true)}
