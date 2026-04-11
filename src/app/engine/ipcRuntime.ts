@@ -5,6 +5,7 @@ import type {
   NodeResultFrame,
   RunNodeRequest,
 } from '../../globals';
+import { MockRuntime } from './runtime';
 import type { NodeContext, Runtime, RuntimeResult } from './runtime';
 
 /**
@@ -42,6 +43,15 @@ export class IpcRuntime implements Runtime {
   private unsubscribeLog: (() => void) | null = null;
   private reqCounter = 0;
   private disposed = false;
+  /**
+   * Fallback runtime for blocks that have no ``nodeId`` assigned.
+   * Legacy scenarios (and any block the user hasn't bound to a
+   * Python node yet) flow through this so they keep animating with
+   * mock latency instead of being silently no-op'd. Label-based
+   * mock behaviour (FAIL / MISSING triggers) still works in this
+   * mixed mode.
+   */
+  private mockFallback = new MockRuntime();
 
   /**
    * Ensure the worker is running, prime the manifest, and install a
@@ -92,16 +102,20 @@ export class IpcRuntime implements Runtime {
     }
     const nodeId = block.nodeId;
     if (!nodeId) {
-      // Block has no nodeId — silently succeed so the scenario keeps
-      // flowing. Authored-but-not-yet-typed blocks shouldn't crash
-      // the engine.
-      ctx.log('warn', 'nodeId 未設定のため実ノード実行をスキップ');
-      return { ok: true };
+      // Block has no nodeId — delegate to the mock fallback so legacy
+      // scenarios keep animating. The user sees the same mock latency
+      // and FAIL/MISSING label triggers they had before, and the
+      // Inspector's NODE dropdown makes upgrading to a real Python
+      // node a one-click change.
+      return this.mockFallback.run(block, ctx);
     }
     const manifest = this.manifestByNodeId.get(nodeId);
     if (!manifest) {
-      ctx.log('error', `未知のノード id: ${nodeId}`);
-      return { ok: false, errorMessage: `unknown node id: ${nodeId}` };
+      ctx.log(
+        'warn',
+        `ノード id "${nodeId}" がワーカーの manifest に存在しません → Mock で実行`,
+      );
+      return this.mockFallback.run(block, ctx);
     }
 
     // Resolve in-port bindings from the variable store. Out-ports
