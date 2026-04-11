@@ -49,37 +49,39 @@
 
 :root,
 [data-theme='dark'] {
-  /* Dark theme — lifted noticeably from the original near-black palette
-     so text stays legible without losing the dark aesthetic. */
-  --fl-bg: #0b1220;
-  --fl-panel: #111827;
-  --fl-panel-2: #1e293b;
-  --fl-modal: #1e293b;
-  --fl-border: #1e293b;
-  --fl-border-2: #334155;
-  --fl-border-strong: #475569;
-  --fl-text: #f1f5f9;
-  --fl-text-muted: #e2e8f0;
-  --fl-text-dim: #cbd5e1;
-  --fl-text-faint: #94a3b8;
-  --fl-text-ghost: #475569;
-  --fl-error-panel: #1d0c10;
-  --fl-error-canvas: #14060a;
+  /* SlateGray palette — neutral gray with a faint cool undertone,
+     deliberately lower in blue saturation than Tailwind's default
+     slate (which reads quite blue). Inspired by the CSS named
+     color SlateGray (#708090). */
+  --fl-bg: #1a1d24;
+  --fl-panel: #252932;
+  --fl-panel-2: #31363f;
+  --fl-modal: #31363f;
+  --fl-border: #31363f;
+  --fl-border-2: #3e4450;
+  --fl-border-strong: #525763;
+  --fl-text: #e8eaee;
+  --fl-text-muted: #cfd2d8;
+  --fl-text-dim: #9ba0a9;
+  --fl-text-faint: #70757e;
+  --fl-text-ghost: #4a4f58;
+  --fl-error-panel: #2a1618;
+  --fl-error-canvas: #1e1012;
 }
 
 [data-theme='light'] {
-  --fl-bg: #f8fafc;
+  --fl-bg: #f5f6f8;
   --fl-panel: #ffffff;
-  --fl-panel-2: #f1f5f9;
+  --fl-panel-2: #eceef2;
   --fl-modal: #ffffff;
-  --fl-border: #e2e8f0;
-  --fl-border-2: #cbd5e1;
-  --fl-border-strong: #94a3b8;
-  --fl-text: #0f172a;
-  --fl-text-muted: #1e293b;
-  --fl-text-dim: #475569;
-  --fl-text-faint: #64748b;
-  --fl-text-ghost: #cbd5e1;
+  --fl-border: #dfe2e8;
+  --fl-border-2: #c7cbd3;
+  --fl-border-strong: #8d93a0;
+  --fl-text: #1a1d24;
+  --fl-text-muted: #2c3039;
+  --fl-text-dim: #545a65;
+  --fl-text-faint: #70757e;
+  --fl-text-ghost: #c7cbd3;
   --fl-error-panel: #fef2f2;
   --fl-error-canvas: #fff7f7;
 }

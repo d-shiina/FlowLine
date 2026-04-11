@@ -60,7 +60,7 @@ export function Toolbar({
   return (
     <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-fl-border bg-fl-panel px-5 py-3">
       <div className="flex min-w-0 items-center gap-2.5">
-        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] text-[13px]">
+        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-[#525763] to-[#8d93a0] text-[13px]">
           <Play className="h-3.5 w-3.5 fill-white stroke-white" />
         </div>
         <div className="flex min-w-0 flex-col">
