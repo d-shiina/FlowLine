@@ -48,4 +48,51 @@ contextBridge.exposeInMainWorld('flowlineRuntime', {
     ipcRenderer.on('runtime:install-progress', handler);
     return () => ipcRenderer.off('runtime:install-progress', handler);
   },
+  /**
+   * Boot the Python worker (if not already up) and return the node
+   * manifest. Resolves with `{ ok: true, manifest }` on success or
+   * `{ ok: false, error }` on startup failure.
+   */
+  ensureWorker: () => ipcRenderer.invoke('runtime:ensure-worker'),
+  /** Fetch the cached node manifest without forcing a spawn. */
+  manifest: () => ipcRenderer.invoke('runtime:node-manifest'),
+  /**
+   * Dispatch a single ``run_node`` request to the worker. Resolves
+   * once the worker emits the terminal ``result`` frame. Transport
+   * errors become ``{ ok: false, error }``; node-level failures show
+   * up as ``{ ok: true, result: { ok: false, error: {...} } }``.
+   */
+  runNode: (request: {
+    reqId: string;
+    blockId: string;
+    trackId: string;
+    nodeId: string;
+    params: Record<string, unknown>;
+    ports: Record<string, unknown>;
+    timeout?: number;
+  }) => ipcRenderer.invoke('runtime:run-node', request),
+  /**
+   * Ask the worker to cooperatively cancel the in-flight request.
+   * Safe to call after completion — it's a no-op in that case.
+   */
+  cancelNode: (reqId: string) =>
+    ipcRenderer.invoke('runtime:cancel-node', reqId),
+  /**
+   * Subscribe to worker ``log`` frames. Main process routes each
+   * frame only to the WebContents that made the matching run_node
+   * request, so multi-window setups don't cross-talk.
+   */
+  onNodeLog: (
+    cb: (frame: {
+      reqId: string;
+      blockId: string;
+      trackId: string;
+      level: 'info' | 'warn' | 'error';
+      message: string;
+    }) => void,
+  ) => {
+    const handler = (_: unknown, p: Parameters<typeof cb>[0]) => cb(p);
+    ipcRenderer.on('runtime:node-log', handler);
+    return () => ipcRenderer.off('runtime:node-log', handler);
+  },
 });

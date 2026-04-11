@@ -60,6 +60,16 @@ export class Executor {
   private aborted = false;
   private waiters: Waiter[] = [];
   private logId = 0;
+  /**
+   * Mutable variable store for the run. Seeded from
+   * `scenario.variables.scenario` so authors can set initial values in
+   * the JSON; updates from out-ports and future built-in nodes land
+   * here. Keys are flat dotted paths like `"scenario.target"` or
+   * `"track.t-main.loop_index"` — scope is encoded in the prefix so
+   * the store itself stays a single Map. Runtimes read/write through
+   * the `NodeContext.getVariable` / `setVariable` helpers.
+   */
+  private variables: Map<string, unknown>;
 
   constructor(scenario: Scenario, runtime: Runtime, hooks: ExecutionHooks) {
     this.scenario = scenario;
@@ -72,6 +82,10 @@ export class Executor {
       currentSlot: {},
       logs: [],
     };
+    this.variables = new Map<string, unknown>();
+    for (const [key, value] of Object.entries(scenario.variables.scenario)) {
+      this.variables.set(`scenario.${key}`, value);
+    }
   }
 
   async run(): Promise<void> {
@@ -249,6 +263,10 @@ export class Executor {
         log: (level, message) => this.log(level, trackId, block.id, message),
         cancelled: () => this.aborted,
         sleep: (ms) => this.sleep(ms),
+        getVariable: (key) => this.variables.get(key),
+        setVariable: (key, value) => {
+          this.variables.set(key, value);
+        },
       };
 
       let result;

@@ -3,8 +3,9 @@ import type { LogEntry } from './types';
 
 /**
  * A `Runtime` is the pluggable layer that actually "runs" a block. Phase 1
- * ships a mock runtime that just sleeps; Phase 2 will swap this for a real
- * implementation that talks to a Python worker over stdin/stdout JSON.
+ * ships a mock runtime that just sleeps; Phase 2 swaps this for
+ * `IpcRuntime`, which talks to a Python worker over stdin/stdout JSON via
+ * the main process.
  */
 export interface NodeContext {
   blockId: string;
@@ -15,6 +16,19 @@ export interface NodeContext {
   cancelled(): boolean;
   /** Abort-aware sleep. Resolves early if the scenario is cancelled. */
   sleep(ms: number): Promise<void>;
+  /**
+   * Read a variable from the scenario-wide store by dotted path. Runtimes
+   * use this to resolve a block's `bindings` into concrete `ports` values
+   * before dispatching a `run_node` request. Returns `undefined` when the
+   * key doesn't exist.
+   */
+  getVariable(key: string): unknown;
+  /**
+   * Write a variable into the scenario-wide store. Runtimes call this with
+   * the out-port values they receive from the worker so downstream blocks
+   * (possibly on other tracks) observe the update.
+   */
+  setVariable(key: string, value: unknown): void;
 }
 
 export interface RuntimeResult {

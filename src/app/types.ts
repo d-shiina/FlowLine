@@ -40,10 +40,15 @@ export interface Block {
   deps: string[];
   /** Free-form node parameters. Overrides node decorator defaults. */
   params?: Record<string, unknown>;
-  /** Variable references this block reads. */
-  inputs?: string[];
-  /** Variable references this block writes. */
-  outputs?: string[];
+  /**
+   * Port-to-variable bindings. Maps a node's port name (declared on the
+   * Python decorator's `ports={...}`) to a scenario-variable path like
+   * `"scenario.target"` or `"track.loop_index"`. The engine resolves
+   * in-ports before sending `run_node` to the worker, and reflects
+   * out-ports back into the variable store after the result returns.
+   * See docs/03-nodes.md (rev2).
+   */
+  bindings?: Record<string, string>;
   /** Max runtime in seconds. Undefined = engine default. */
   timeout?: number;
   /** If true, a missing target is not an error — silently skip. */

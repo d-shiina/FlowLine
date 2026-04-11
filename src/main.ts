@@ -2,6 +2,14 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { detectPython, installPython } from './main/pythonRuntime';
+import {
+  cancelNode,
+  ensureWorkerReady,
+  getManifest,
+  runNode,
+  shutdownWorker,
+  type RunNodeRequest,
+} from './main/pythonWorker';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -93,6 +101,41 @@ ipcMain.handle('runtime:install', async (e) => {
   }
 });
 
+// ── Python worker IPC ──────────────────────────────────────────────
+// The renderer's `IpcRuntime` dispatches `run_node` requests through
+// here. ``runtime:run-node`` is synchronous (on the renderer side):
+// it resolves with the terminal ``result`` frame. Live ``log`` frames
+// stream via ``runtime:node-log``, not the invoke return channel.
+ipcMain.handle(
+  'runtime:run-node',
+  async (e, request: RunNodeRequest) => {
+    try {
+      const result = await runNode(e.sender, request);
+      return { ok: true, result };
+    } catch (err) {
+      return {
+        ok: false,
+        error: (err as Error).message ?? String(err),
+      };
+    }
+  },
+);
+
+ipcMain.handle('runtime:cancel-node', async (_e, reqId: string) => {
+  cancelNode(reqId);
+});
+
+ipcMain.handle('runtime:ensure-worker', async () => {
+  try {
+    const manifest = await ensureWorkerReady();
+    return { ok: true, manifest };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message ?? String(err) };
+  }
+});
+
+ipcMain.handle('runtime:node-manifest', async () => getManifest());
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -105,6 +148,18 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// Make sure the Python worker stops along with the app. ``before-quit``
+// fires before windows are torn down so we have a chance to send the
+// ``shutdown`` frame cleanly. Guarded so we don't loop on the second
+// quit triggered by ``app.exit``.
+let shuttingDown = false;
+app.on('before-quit', (event) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  event.preventDefault();
+  shutdownWorker().finally(() => app.exit(0));
 });
 
 app.on('activate', () => {
