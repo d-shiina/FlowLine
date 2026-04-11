@@ -10,6 +10,7 @@ import {
 import { useScenario, uid } from './useScenario';
 import { useTheme } from './useTheme';
 import { useExecution } from './engine';
+import { useNodeManifest } from './useNodeManifest';
 import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Titlebar } from './components/Titlebar';
@@ -411,6 +412,12 @@ export default function App() {
       ? 'ready'
       : 'missing'
     : 'unknown';
+
+  // Node manifest from the Python worker. Drives the Inspector's
+  // node picker / ports editor / params editor. Empty array when
+  // the worker isn't up, which makes those panels fall back to
+  // "(未設定 / Mock で実行)" — the UI stays fully usable.
+  const { manifest: nodeManifest } = useNodeManifest();
 
   // ─── samples ───────────────────────────────────────────────────────
   const [samplesOpen, setSamplesOpen] = useState(false);
@@ -858,6 +865,7 @@ export default function App() {
           isErrorHandler={isErrorHandlerSelection}
           linkMode={mode === 'link'}
           resolveDepLabel={resolveDepLabel}
+          nodeManifest={nodeManifest}
           onChange={store.updateBlock}
           onRemoveDep={store.removeDep}
           onClose={() => setSelected(null)}
