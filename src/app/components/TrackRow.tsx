@@ -33,7 +33,12 @@ interface Props {
   ) => void;
   onDeleteBlock: (trackId: string, blockId: string) => void;
   onSelectBlock: (trackId: string, blockId: string) => void;
-  onCanvasClick: (trackId: string, slot: number) => void;
+  onCanvasClick: (
+    trackId: string,
+    slot: number,
+    /** Container the click landed inside, if any. */
+    parent?: { blockId: string; branch?: 'then' | 'else' },
+  ) => void;
 }
 
 export function TrackRow({
@@ -63,20 +68,12 @@ export function TrackRow({
     setRenaming(false);
   };
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const slot = pxToSlot(e.clientX - rect.left);
-    onCanvasClick(track.id, slot);
-  };
-
   // Compute the set of container-frame rects for loop / branch
-  // blocks on this track. Each container wraps itself plus any
-  // blocks whose `parentBlockId` points at it, so the scope is
-  // visually obvious without an explicit "body" editor. Blocks with
-  // no children render normally — only populated containers get a
-  // frame. Sorted by leftmost slot so overlapping frames layer
-  // predictably (leftmost drawn first).
+  // blocks on this track. Every loop/branch gets a frame, even when
+  // it has no children yet — empty frames render as a faint ghost
+  // hint so the user sees the drop zone. Frames with children
+  // extend to enclose them horizontally. Sorted by leftmost slot so
+  // overlapping frames layer predictably (leftmost drawn first).
   const containerFrames = useMemo(() => {
     const frames: Array<{
       id: string;
@@ -84,13 +81,25 @@ export function TrackRow({
       color: string;
       fromSlot: number;
       toSlot: number;
+      empty: boolean;
     }> = [];
     for (const parent of track.blocks) {
       if (parent.type !== 'loop' && parent.type !== 'branch') continue;
       const children = track.blocks.filter(
         (b) => b.parentBlockId === parent.id,
       );
-      if (children.length === 0) continue;
+      if (children.length === 0) {
+        // Ghost drop zone: parent + one slot of body room.
+        frames.push({
+          id: parent.id,
+          label: parent.label,
+          color: BLOCK_META[parent.type].color,
+          fromSlot: parent.slot,
+          toSlot: parent.slot + 1,
+          empty: true,
+        });
+        continue;
+      }
       const childMin = Math.min(...children.map((c) => c.slot));
       const childMax = Math.max(...children.map((c) => c.slot));
       frames.push({
@@ -99,11 +108,30 @@ export function TrackRow({
         color: BLOCK_META[parent.type].color,
         fromSlot: Math.min(parent.slot, childMin),
         toSlot: Math.max(parent.slot, childMax),
+        empty: false,
       });
     }
     frames.sort((a, b) => a.fromSlot - b.fromSlot);
     return frames;
   }, [track.blocks]);
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const slot = pxToSlot(e.clientX - rect.left);
+    // If the click lands inside a container frame, pass the parent
+    // info along so the new block auto-nests. With overlapping
+    // frames, the last match (rendered on top) wins.
+    const hits = containerFrames.filter(
+      (f) => slot >= f.fromSlot && slot <= f.toSlot,
+    );
+    const parent = hits.length > 0 ? hits[hits.length - 1] : null;
+    onCanvasClick(
+      track.id,
+      slot,
+      parent ? { blockId: parent.id } : undefined,
+    );
+  };
 
   return (
     <div
@@ -217,13 +245,14 @@ export function TrackRow({
 
         {/* Container frames (loop / branch scope visualisation).
             Rendered behind the blocks so the blocks themselves stay
-            interactive. A thin header strip at the top carries the
-            container label so you can tell multiple nested scopes
-            apart at a glance. */}
+            interactive. Empty containers render as faint ghost
+            zones so the user has a visible drop target. */}
         {containerFrames.map((f) => {
           const left = f.fromSlot * SLOT_PX + BLOCK_MARGIN / 2;
           const width =
             (f.toSlot - f.fromSlot + 1) * SLOT_PX - BLOCK_MARGIN;
+          const borderAlpha = f.empty ? '44' : '88';
+          const bgAlpha = f.empty ? '08' : '0f';
           return (
             <div
               key={f.id}
@@ -233,11 +262,15 @@ export function TrackRow({
                 width,
                 top: 3,
                 bottom: 3,
-                borderColor: `${f.color}88`,
-                background: `${f.color}0f`,
+                borderColor: `${f.color}${borderAlpha}`,
+                background: `${f.color}${bgAlpha}`,
                 zIndex: 0,
               }}
-              title={`${f.label} (内包ブロックをまとめて表示)`}
+              title={
+                f.empty
+                  ? `${f.label} (空のボディ — ブロックをドロップして配置)`
+                  : `${f.label} (内包ブロックをまとめて表示)`
+              }
             >
               <div
                 className="absolute top-0 flex items-center gap-1 rounded-br-md px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wider"
@@ -245,10 +278,19 @@ export function TrackRow({
                   left: 0,
                   color: f.color,
                   background: `${f.color}22`,
+                  opacity: f.empty ? 0.55 : 1,
                 }}
               >
                 {f.label}
               </div>
+              {f.empty && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center font-mono text-[9px]"
+                  style={{ color: `${f.color}88` }}
+                >
+                  ここに内包ブロックをドロップ
+                </div>
+              )}
             </div>
           );
         })}
@@ -280,6 +322,7 @@ export function TrackRow({
             linkSource={linkSourceBlockId === b.id}
             draggable={blocksDraggable}
             slotBounds={slotBounds[b.id]}
+            containerFrames={containerFrames}
             subroutines={subroutines}
             onSelect={onSelectBlock}
             onUpdate={onUpdateBlock}

@@ -77,14 +77,22 @@ export interface Block {
    * Id of the container block (loop / branch) this block is nested
    * inside. When set, the renderer wraps the container and its
    * children in a coloured frame so the scope is visually obvious,
-   * and the engine will eventually execute the children inside the
-   * container's control flow (loop body, branch `then`/`else`).
+   * and the engine executes the children inside the container's
+   * control flow (loop body, branch `then`/`else`).
    *
-   * Children must live on the same track as their parent. The
-   * container block itself never has a ``parentBlockId`` pointing
-   * at another container — we don't support nested containers yet.
+   * Children must live on the same track as their parent. Nested
+   * containers are supported — a container may itself live inside
+   * another container, as long as the parent chain has no cycles.
    */
   parentBlockId?: string;
+  /**
+   * For blocks whose parent is a branch, which side of the branch
+   * they belong to. Ignored when the parent is a loop (loops have
+   * a single body). Defaults to ``then`` when a new child is
+   * dropped into a branch frame; the user can flip it via the
+   * Inspector.
+   */
+  parentBranch?: 'then' | 'else';
 }
 
 export interface Track {

@@ -209,6 +209,8 @@ export default function App() {
     trackName: string;
     trackColor: string;
     slot: number;
+    /** Set when the click landed inside a loop/branch frame. */
+    parentBlockId?: string;
   } | null>(null);
   const [syncModal, setSyncModal] = useState<{ slot: number } | null>(null);
 
@@ -237,9 +239,10 @@ export default function App() {
 
   // List the loop / branch blocks that live on the same container as
   // the current selection so Inspector's "内包先" dropdown can offer
-  // them as nesting targets. Excludes the selected block itself so
-  // you can't nest a container inside itself, and is empty when no
-  // block is selected.
+  // them as nesting targets. Nested containers ARE allowed, but we
+  // walk the parent chain to exclude containers that would create
+  // a cycle (the selected block's descendants). Self is always
+  // excluded.
   const availableContainers = useMemo(() => {
     if (!selected) return [];
     const findContainer = (): Block[] | null => {
@@ -253,10 +256,27 @@ export default function App() {
     };
     const blocks = findContainer();
     if (!blocks) return [];
+
+    // Descendants of the selected block — we can't nest into one of
+    // our own descendants without forming a cycle in the parent
+    // chain. BFS over parentBlockId links inside the same container.
+    const descendants = new Set<string>();
+    const queue = [selected.blockId];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      for (const b of blocks) {
+        if (b.parentBlockId === id && !descendants.has(b.id)) {
+          descendants.add(b.id);
+          queue.push(b.id);
+        }
+      }
+    }
+
     return blocks
       .filter(
         (b) =>
           b.id !== selected.blockId &&
+          !descendants.has(b.id) &&
           (b.type === 'loop' || b.type === 'branch'),
       )
       .map((b) => ({ id: b.id, label: b.label, type: b.type }));
@@ -285,7 +305,11 @@ export default function App() {
     [scenario],
   );
 
-  const handleCanvasClick = (trackId: string, slot: number) => {
+  const handleCanvasClick = (
+    trackId: string,
+    slot: number,
+    parent?: { blockId: string; branch?: 'then' | 'else' },
+  ) => {
     // In link mode, clicking empty canvas cancels the pending link source.
     if (mode === 'link') {
       setLinkSource(null);
@@ -298,6 +322,7 @@ export default function App() {
         trackName: 'エラー処理',
         trackColor: '#f43f5e',
         slot,
+        parentBlockId: parent?.blockId,
       });
       return;
     }
@@ -308,6 +333,7 @@ export default function App() {
         trackName: subroutineTrack.name,
         trackColor: subroutineTrack.color,
         slot,
+        parentBlockId: parent?.blockId,
       });
       return;
     }
@@ -321,6 +347,7 @@ export default function App() {
         trackName: t.name,
         trackColor: t.color,
         slot,
+        parentBlockId: parent?.blockId,
       });
     }
   };
@@ -923,7 +950,14 @@ export default function App() {
           trackColor={addModal.trackColor}
           slot={addModal.slot}
           subroutines={scenario.subroutines}
-          onAdd={(block) => store.addBlock(addModal.trackId, block)}
+          onAdd={(block) => {
+            // Preserve the pre-click container hit so blocks added
+            // inside a loop/branch frame land already nested.
+            const nested: Block = addModal.parentBlockId
+              ? { ...block, parentBlockId: addModal.parentBlockId }
+              : block;
+            store.addBlock(addModal.trackId, nested);
+          }}
         />
       )}
       {syncModal && (

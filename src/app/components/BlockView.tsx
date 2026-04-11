@@ -4,6 +4,16 @@ import { BLOCK_META, type Block, type Subroutine } from '../types';
 import type { BlockStatus } from '../engine';
 import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, TRACK_H, pxToSlot } from '../layout';
 
+/** Rect of a container frame rendered on the same track. */
+export interface ContainerFrameRect {
+  id: string;
+  label: string;
+  color: string;
+  fromSlot: number;
+  toSlot: number;
+  empty: boolean;
+}
+
 interface Props {
   block: Block;
   trackId: string;
@@ -18,6 +28,13 @@ interface Props {
    * for blocks with no dependents. Undefined means "no constraint".
    */
   slotBounds?: { min: number; max: number };
+  /**
+   * Container frames that currently exist on the same track. Used by
+   * the drag handler to auto-reparent a block when it's dropped over
+   * a loop / branch scope. When `block` IS a container, its own frame
+   * is excluded from the hit-test so you can't nest it inside itself.
+   */
+  containerFrames: ContainerFrameRect[];
   subroutines: Subroutine[];
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
@@ -101,6 +118,7 @@ export function BlockView({
   linkSource,
   draggable,
   slotBounds,
+  containerFrames,
   subroutines,
   onSelect,
   onUpdate,
@@ -201,8 +219,38 @@ export function BlockView({
 
       if (!didMove || cancelled) return;
 
-      if (targetSlot !== block.slot) {
-        onUpdate(trackId, block.id, { slot: targetSlot });
+      // Compute the container frame the drop slot falls into, so we
+      // can auto-reparent the block into the loop/branch scope (or
+      // un-nest it if the drop is outside any frame). The block's
+      // own frame is skipped so a container can't nest itself.
+      const landingFrame = containerFrames.find(
+        (f) =>
+          f.id !== block.id &&
+          targetSlot >= f.fromSlot &&
+          targetSlot <= f.toSlot,
+      );
+
+      const patch: Partial<Block> = {};
+      if (targetSlot !== block.slot) patch.slot = targetSlot;
+
+      const nextParentId = landingFrame?.id;
+      if (nextParentId !== block.parentBlockId) {
+        patch.parentBlockId = nextParentId;
+        // Entering/exiting a branch clears or defaults the branch
+        // selector. Default to 'then' when entering a branch so new
+        // children land on the true side; the Inspector can flip it.
+        if (nextParentId === undefined) {
+          patch.parentBranch = undefined;
+        } else {
+          patch.parentBranch =
+            block.parentBranch && block.parentBlockId === nextParentId
+              ? block.parentBranch
+              : 'then';
+        }
+      }
+
+      if (Object.keys(patch).length > 0) {
+        onUpdate(trackId, block.id, patch);
       }
 
       // Swallow the click that the browser synthesizes after the
@@ -373,6 +421,27 @@ export function BlockView({
               </span>
             ))}
           </div>
+        )}
+
+        {/* TRUE / FALSE pill for branch children so it's obvious
+            which side of the branch owns each block without having
+            to open the Inspector. */}
+        {block.parentBranch && (
+          <span
+            className="pointer-events-none absolute right-1 bottom-1 flex h-3 items-center justify-center rounded px-1 font-mono text-[8px] font-bold leading-none"
+            style={{
+              background:
+                block.parentBranch === 'then' ? '#22c55e2a' : '#ef44442a',
+              color: block.parentBranch === 'then' ? '#22c55e' : '#ef4444',
+            }}
+            title={
+              block.parentBranch === 'then'
+                ? '分岐 TRUE 側'
+                : '分岐 FALSE 側'
+            }
+          >
+            {block.parentBranch === 'then' ? 'TRUE' : 'FALSE'}
+          </span>
         )}
 
         {hov && !dragging && (

@@ -5,6 +5,7 @@ import type {
   LogEntry,
 } from './types';
 import type { NodeContext, Runtime } from './runtime';
+import { evalBool } from './jsonLogic';
 
 export interface ExecutionHooks {
   onStateChange(state: ExecutionState): void;
@@ -154,12 +155,21 @@ export class Executor {
   // ────────────────────────────────────────────────────────────────────
 
   private async runTrack(track: Track): Promise<void> {
-    const sorted = [...track.blocks].sort((a, b) => a.slot - b.slot);
+    // Only top-level blocks drive the outer loop. Blocks with a
+    // parentBlockId run inside their container's body (loop body or
+    // branch then/else) and are dispatched by executeContainer.
+    const topLevel = track.blocks
+      .filter((b) => !b.parentBlockId)
+      .sort((a, b) => a.slot - b.slot);
     const crossedSyncSlots = new Set<number>();
 
-    for (const block of sorted) {
+    for (const block of topLevel) {
       if (this.aborted) {
         this.markCancelled(block.id);
+        // Cascade cancel to children so the UI shows them greyed out.
+        for (const child of this.childrenOf(track.blocks, block.id)) {
+          this.markCancelled(child.id);
+        }
         continue;
       }
 
@@ -200,6 +210,11 @@ export class Executor {
       );
       if (depFailed) {
         this.state.status[block.id] = 'skipped';
+        // Children inherit the skip so the UI doesn't pretend they
+        // ran on their own.
+        for (const child of this.childrenOf(track.blocks, block.id)) {
+          this.state.status[child.id] = 'skipped';
+        }
         this.log(
           'warn',
           track.id,
@@ -211,21 +226,197 @@ export class Executor {
       }
 
       this.state.currentSlot[track.id] = block.slot;
-      await this.executeBlock(track.id, block, { isErrorHandler: false });
+      await this.executeBlockOrGroup(track.id, track.blocks, block, {
+        isErrorHandler: false,
+      });
     }
     // Clear the per-track playhead once the track drains.
     delete this.state.currentSlot[track.id];
     this.flush();
   }
 
+  /**
+   * Dispatch a block to either the regular-block path or a
+   * container-aware path. Containers (loop / branch) recurse into
+   * their child blocks using the same track's block pool and the
+   * parentBlockId / parentBranch links.
+   */
+  private async executeBlockOrGroup(
+    containerId: string,
+    trackBlocks: Block[],
+    block: Block,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    if (block.type === 'loop') {
+      await this.executeLoop(containerId, trackBlocks, block, opts);
+      return;
+    }
+    if (block.type === 'branch') {
+      await this.executeBranch(containerId, trackBlocks, block, opts);
+      return;
+    }
+    await this.executeBlock(containerId, block, opts);
+  }
+
+  /**
+   * Children of ``parentId`` within the given track block pool,
+   * optionally filtered by which side of a branch they belong to.
+   * Sorted by slot so execution order matches visual order.
+   */
+  private childrenOf(
+    trackBlocks: Block[],
+    parentId: string,
+    branch?: 'then' | 'else',
+  ): Block[] {
+    return trackBlocks
+      .filter(
+        (b) =>
+          b.parentBlockId === parentId &&
+          (branch === undefined || (b.parentBranch ?? 'then') === branch),
+      )
+      .sort((a, b) => a.slot - b.slot);
+  }
+
+  /**
+   * Execute a loop block's body. Iteration count comes from
+   * ``params.iterations`` (defaults to 1). Body execution stops early
+   * on abort or on a child that escalated to error. The loop block
+   * itself is marked ``running`` across all iterations, then ``ok``
+   * or ``error`` at the end — individual child statuses flash
+   * through on each iteration.
+   */
+  private async executeLoop(
+    containerId: string,
+    trackBlocks: Block[],
+    loopBlock: Block,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    const rawIterations = (loopBlock.params as Record<string, unknown>)
+      ?.iterations;
+    const iterations =
+      typeof rawIterations === 'number' && rawIterations > 0
+        ? Math.floor(rawIterations)
+        : 1;
+
+    this.state.status[loopBlock.id] = 'running';
+    this.log(
+      'info',
+      containerId,
+      loopBlock.id,
+      `ループ開始 (${iterations} 回)`,
+    );
+    this.flush();
+
+    const children = this.childrenOf(trackBlocks, loopBlock.id);
+
+    let failed = false;
+    for (let i = 0; i < iterations; i++) {
+      if (this.aborted) break;
+      if (iterations > 1) {
+        this.log('info', containerId, loopBlock.id, `反復 ${i + 1}/${iterations}`);
+      }
+      // Seed the iteration index as a track-scope variable so child
+      // blocks can read it via bindings like ``track.loop_index``.
+      this.variables.set(`track.${containerId}.loop_index`, i);
+      for (const child of children) {
+        if (this.aborted) break;
+        await this.executeBlockOrGroup(containerId, trackBlocks, child, opts);
+        if (this.state.status[child.id] === 'error') {
+          failed = true;
+          break;
+        }
+      }
+      if (failed) break;
+    }
+
+    if (this.aborted) {
+      this.state.status[loopBlock.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[loopBlock.id] = 'error';
+    } else {
+      this.state.status[loopBlock.id] = 'ok';
+      this.log('info', containerId, loopBlock.id, 'ループ完了');
+    }
+    this.flush();
+  }
+
+  /**
+   * Execute a branch block: evaluate its JSON Logic condition
+   * against the scenario variable store, then run the children on
+   * the winning side only. The losing side is marked ``skipped`` so
+   * the UI shows which path was taken.
+   */
+  private async executeBranch(
+    containerId: string,
+    trackBlocks: Block[],
+    branchBlock: Block,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    this.state.status[branchBlock.id] = 'running';
+    this.flush();
+
+    const condition = (branchBlock.params as Record<string, unknown>)
+      ?.condition;
+    const taken = evalBool(condition, {
+      getVariable: (key) => this.variables.get(key),
+      onWarn: (msg) =>
+        this.log('warn', containerId, branchBlock.id, `条件式: ${msg}`),
+    });
+
+    this.log(
+      'info',
+      containerId,
+      branchBlock.id,
+      `条件 → ${taken ? 'TRUE' : 'FALSE'}`,
+    );
+
+    const winners = this.childrenOf(
+      trackBlocks,
+      branchBlock.id,
+      taken ? 'then' : 'else',
+    );
+    const losers = this.childrenOf(
+      trackBlocks,
+      branchBlock.id,
+      taken ? 'else' : 'then',
+    );
+    for (const loser of losers) {
+      this.state.status[loser.id] = 'skipped';
+    }
+    this.flush();
+
+    let failed = false;
+    for (const child of winners) {
+      if (this.aborted) break;
+      await this.executeBlockOrGroup(containerId, trackBlocks, child, opts);
+      if (this.state.status[child.id] === 'error') {
+        failed = true;
+        break;
+      }
+    }
+
+    if (this.aborted) {
+      this.state.status[branchBlock.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[branchBlock.id] = 'error';
+    } else {
+      this.state.status[branchBlock.id] = 'ok';
+    }
+    this.flush();
+  }
+
   private async runErrorHandler(track: Track): Promise<void> {
-    const sorted = [...track.blocks].sort((a, b) => a.slot - b.slot);
-    for (const block of sorted) {
+    const topLevel = track.blocks
+      .filter((b) => !b.parentBlockId)
+      .sort((a, b) => a.slot - b.slot);
+    for (const block of topLevel) {
       // Error handler forces onError = skip (see docs/02-error-handling.md)
       // so a cleanup failure never re-escalates.
       const forced: Block = { ...block, onError: 'skip' };
       this.state.currentSlot[track.id] = block.slot;
-      await this.executeBlock(track.id, forced, { isErrorHandler: true });
+      await this.executeBlockOrGroup(track.id, track.blocks, forced, {
+        isErrorHandler: true,
+      });
     }
     delete this.state.currentSlot[track.id];
     this.flush();
@@ -388,14 +579,18 @@ export class Executor {
     this.log('info', trackId, callBlock.id, `サブルーチン「${sub.name}」呼出`);
     this.flush();
 
-    const sorted = [...sub.blocks].sort((a, b) => a.slot - b.slot);
-    for (const sb of sorted) {
+    const topLevel = sub.blocks
+      .filter((b) => !b.parentBlockId)
+      .sort((a, b) => a.slot - b.slot);
+    for (const sb of topLevel) {
       if (this.aborted) {
         this.markCancelled(sb.id);
         continue;
       }
       this.state.currentSlot[sub.id] = sb.slot;
-      await this.executeBlock(sub.id, sb, { isErrorHandler: false });
+      await this.executeBlockOrGroup(sub.id, sub.blocks, sb, {
+        isErrorHandler: false,
+      });
       if (this.state.status[sb.id] === 'error' || this.aborted) {
         // Propagate sub-failure up to the call block.
         this.state.status[callBlock.id] = 'error';

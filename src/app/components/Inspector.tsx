@@ -210,37 +210,74 @@ export function Inspector({
         />
       </label>
 
-      {/* Only non-container blocks can be nested. Containers
-          themselves can't be nested inside other containers yet. */}
-      {block.type !== 'loop' &&
-        block.type !== 'branch' &&
-        availableContainers.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <span className="font-mono text-[9px] text-fl-text-faint">
-              内包先
-            </span>
-            <Select<string>
-              value={block.parentBlockId ?? ''}
-              onValueChange={(v) =>
+      {availableContainers.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="font-mono text-[9px] text-fl-text-faint">
+            内包先
+          </span>
+          <Select<string>
+            value={block.parentBlockId ?? ''}
+            onValueChange={(v) => {
+              if (v === '') {
                 onChange(trackId, block.id, {
-                  parentBlockId: v === '' ? undefined : v,
-                })
+                  parentBlockId: undefined,
+                  parentBranch: undefined,
+                });
+              } else {
+                // Default to 'then' when nesting into a branch.
+                const target = availableContainers.find((c) => c.id === v);
+                onChange(trackId, block.id, {
+                  parentBlockId: v,
+                  parentBranch:
+                    target?.type === 'branch'
+                      ? (block.parentBranch ?? 'then')
+                      : undefined,
+                });
               }
-              options={[
-                { value: '', label: '(なし)' },
-                ...availableContainers.map((c) => ({
-                  value: c.id,
-                  label: `${c.type === 'loop' ? '↻' : '⑂'} ${c.label}`,
-                })),
-              ]}
-            />
-            {block.parentBlockId && (
-              <span className="font-mono text-[8px] text-fl-text-ghost">
-                このブロックは親コンテナのボディとして実行されます
-              </span>
+            }}
+            options={[
+              { value: '', label: '(なし)' },
+              ...availableContainers.map((c) => ({
+                value: c.id,
+                label: `${c.type === 'loop' ? '↻' : '⑂'} ${c.label}`,
+              })),
+            ]}
+          />
+          {block.parentBlockId &&
+            availableContainers.find((c) => c.id === block.parentBlockId)
+              ?.type === 'branch' && (
+              <Select<'then' | 'else'>
+                value={block.parentBranch ?? 'then'}
+                onValueChange={(side) =>
+                  onChange(trackId, block.id, { parentBranch: side })
+                }
+                options={[
+                  { value: 'then', label: 'TRUE 側 (条件一致)' },
+                  { value: 'else', label: 'FALSE 側 (条件不一致)' },
+                ]}
+              />
             )}
-          </div>
-        )}
+          {block.parentBlockId && (
+            <span className="font-mono text-[8px] text-fl-text-ghost">
+              親コンテナのボディとして実行されます
+            </span>
+          )}
+        </div>
+      )}
+
+      {block.type === 'loop' && (
+        <LoopParamsSection
+          block={block}
+          onChange={(patch) => onChange(trackId, block.id, patch)}
+        />
+      )}
+
+      {block.type === 'branch' && (
+        <BranchParamsSection
+          block={block}
+          onChange={(patch) => onChange(trackId, block.id, patch)}
+        />
+      )}
 
       {block.type === 'action' && (
         <div className="flex flex-col gap-1">
@@ -424,6 +461,131 @@ export function Inspector({
         id: {block.id}
       </div>
     </aside>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Loop / branch built-in control-flow editors
+// ──────────────────────────────────────────────────────────────────
+
+interface LoopParamsProps {
+  block: Block;
+  onChange: (patch: Partial<Block>) => void;
+}
+
+/**
+ * Loop iteration count editor. The executor reads
+ * ``params.iterations`` when it enters the loop and runs the body
+ * that many times. Defaults to 1 so a freshly-added loop doesn't
+ * accidentally spin forever.
+ */
+function LoopParamsSection({ block, onChange }: LoopParamsProps) {
+  const raw = (block.params as Record<string, unknown> | undefined)
+    ?.iterations;
+  const current =
+    typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+      ? Math.floor(raw)
+      : 1;
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="font-mono text-[9px] text-fl-text-faint">
+        反復回数
+      </span>
+      <input
+        type="number"
+        min={1}
+        max={10_000}
+        value={current}
+        onChange={(e) => {
+          const n = Math.max(1, Math.floor(Number(e.target.value) || 1));
+          const next = { ...(block.params ?? {}) } as Record<string, unknown>;
+          next.iterations = n;
+          onChange({ params: next });
+        }}
+        className="rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none"
+      />
+      <span className="font-mono text-[8px] text-fl-text-ghost">
+        内包ブロックを上記回数くりかえし実行します。
+        反復中は <span className="text-fl-text-dim">track.&lt;id&gt;.loop_index</span>
+        &nbsp;が 0 始まりで更新されます
+      </span>
+    </div>
+  );
+}
+
+interface BranchParamsProps {
+  block: Block;
+  onChange: (patch: Partial<Block>) => void;
+}
+
+/**
+ * Branch condition editor. Accepts a JSON Logic expression as a
+ * plain JSON string; the executor parses it, evaluates it against
+ * the scenario variable store, and runs the TRUE or FALSE side
+ * accordingly. Invalid JSON surfaces an inline red error without
+ * dropping the unsaved text so the user can correct it.
+ */
+function BranchParamsSection({ block, onChange }: BranchParamsProps) {
+  const raw = (block.params as Record<string, unknown> | undefined)
+    ?.condition;
+  const initial = raw === undefined ? '' : JSON.stringify(raw, null, 2);
+  const [local, setLocal] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+
+  // Resync when the underlying block/params identity changes.
+  const syncKey = `${block.id}::${initial}`;
+  useEffect(() => {
+    setLocal(initial);
+    setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncKey]);
+
+  const commit = () => {
+    const trimmed = local.trim();
+    if (trimmed === '') {
+      const next = { ...(block.params ?? {}) } as Record<string, unknown>;
+      delete next.condition;
+      onChange({
+        params: Object.keys(next).length > 0 ? next : undefined,
+      });
+      setError(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const next = { ...(block.params ?? {}) } as Record<string, unknown>;
+      next.condition = parsed;
+      onChange({ params: next });
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="font-mono text-[9px] text-fl-text-faint">
+        条件 (JSON Logic)
+      </span>
+      <textarea
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={commit}
+        spellCheck={false}
+        rows={4}
+        placeholder='{ "<": [{ "var": "scenario.count" }, 10] }'
+        className="resize-none rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[10px] leading-relaxed text-fl-text outline-none"
+      />
+      {error ? (
+        <span className="font-mono text-[9px] text-[#ef4444]">{error}</span>
+      ) : (
+        <span className="font-mono text-[8px] leading-relaxed text-fl-text-ghost">
+          例: <span className="text-fl-text-dim">{'{ ">": [{ "var": "scenario.retry" }, 0] }'}</span>
+          <br />
+          TRUE 側 / FALSE 側 の分岐は内包ブロックのバッジで指定します
+        </span>
+      )}
+    </div>
   );
 }
 
