@@ -1,4 +1,13 @@
-import { Play, Square, Plus, Upload, Download, Hexagon, Box } from 'lucide-react';
+import {
+  Play,
+  Square,
+  Plus,
+  Upload,
+  Download,
+  Hexagon,
+  Box,
+  BookOpen,
+} from 'lucide-react';
 
 export type EditMode = 'block' | 'sync';
 
@@ -10,6 +19,7 @@ interface Props {
   onAddTrack: () => void;
   onImport: () => void;
   onExport: () => void;
+  onSample: () => void;
 }
 
 export function Toolbar({
@@ -20,6 +30,7 @@ export function Toolbar({
   onAddTrack,
   onImport,
   onExport,
+  onSample,
 }: Props) {
   return (
     <div className="flex flex-shrink-0 items-center justify-between border-b border-[#0f172a] bg-[#0a1020] px-5 py-3">
@@ -73,9 +84,18 @@ export function Toolbar({
 
         <button
           type="button"
+          onClick={onSample}
+          className="flex items-center gap-1 rounded-lg border-[1.5px] border-[#334155] bg-[#0f172a] px-3 py-1.5 font-mono text-[10px] font-bold text-slate-400"
+          title="サンプルシナリオを読込"
+        >
+          <BookOpen className="h-3 w-3" /> サンプル
+        </button>
+
+        <button
+          type="button"
           onClick={onImport}
           className="flex items-center gap-1 rounded-lg border-[1.5px] border-[#334155] bg-[#0f172a] px-3 py-1.5 font-mono text-[10px] font-bold text-slate-400"
-          title="JSONを読み込み"
+          title="JSONを読み込み (Ctrl+O)"
         >
           <Upload className="h-3 w-3" /> 読込
         </button>
@@ -83,7 +103,7 @@ export function Toolbar({
           type="button"
           onClick={onExport}
           className="flex items-center gap-1 rounded-lg border-[1.5px] border-[#334155] bg-[#0f172a] px-3 py-1.5 font-mono text-[10px] font-bold text-slate-400"
-          title="JSONを保存"
+          title="JSONを保存 (Ctrl+S)"
         >
           <Download className="h-3 w-3" /> 保存
         </button>

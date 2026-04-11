@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ERROR_DIVIDER_H,
   HEADER_W,
@@ -16,6 +16,7 @@ import { TrackRow } from './components/TrackRow';
 import { SyncLine } from './components/SyncLine';
 import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
+import { SamplesModal } from './components/SamplesModal';
 import { Inspector } from './components/Inspector';
 
 /**
@@ -137,7 +138,7 @@ export default function App() {
   // ─── JSON import / export ──────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleExport = () => {
+  const handleExport = useCallback(() => {
     const blob = new Blob([JSON.stringify(scenario, null, 2)], {
       type: 'application/json',
     });
@@ -147,9 +148,9 @@ export default function App() {
     a.download = `${scenario.name || 'flowline-scenario'}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  };
+  }, [scenario]);
 
-  const handleImport = () => fileInputRef.current?.click();
+  const handleImport = useCallback(() => fileInputRef.current?.click(), []);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -171,6 +172,59 @@ export default function App() {
     }
   };
 
+  // ─── samples ───────────────────────────────────────────────────────
+  const [samplesOpen, setSamplesOpen] = useState(false);
+  const handleLoadSample = useCallback(
+    (next: Scenario) => {
+      store.replace(next);
+      setSelected(null);
+    },
+    [store],
+  );
+
+  // ─── keyboard shortcuts ───────────────────────────────────────────
+  // Delete/Backspace: delete selected block
+  // Escape: deselect
+  // Ctrl/Cmd+S: export JSON
+  // Ctrl/Cmd+O: trigger file picker
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (e.key === 'Escape') {
+        setSelected(null);
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+        e.preventDefault();
+        store.deleteBlock(selected.trackId, selected.blockId);
+        setSelected(null);
+        return;
+      }
+      if (ctrl && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleExport();
+        return;
+      }
+      if (ctrl && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        handleImport();
+        return;
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [selected, store, handleExport, handleImport]);
+
   // ─── render ────────────────────────────────────────────────────────
   const canvasWidth = totalSlots * SLOT_PX + HEADER_W;
   // Sync points and playhead line span regular tracks only — not the
@@ -187,6 +241,7 @@ export default function App() {
         onAddTrack={store.addTrack}
         onImport={handleImport}
         onExport={handleExport}
+        onSample={() => setSamplesOpen(true)}
       />
 
       <input
@@ -387,6 +442,11 @@ export default function App() {
           onAdd={store.addSync}
         />
       )}
+      <SamplesModal
+        open={samplesOpen}
+        onOpenChange={setSamplesOpen}
+        onLoad={handleLoadSample}
+      />
     </div>
   );
 }

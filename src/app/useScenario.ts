@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { Block, Scenario, SyncPoint, Track } from './types';
 import { ERROR_HANDLER_COLOR, ERROR_HANDLER_ID, TRACK_COLORS } from './types';
-import { initialScenario } from './initialScenario';
+import { DEFAULT_SAMPLE, cloneSample } from './samples';
 
 let _uid = 1000;
 export const uid = (prefix = 'id') => `${prefix}-${++_uid}`;
@@ -85,7 +85,9 @@ export interface ScenarioStore {
 }
 
 export function useScenario(): ScenarioStore {
-  const [scenario, setScenario] = useState<Scenario>(initialScenario);
+  const [scenario, setScenario] = useState<Scenario>(() =>
+    cloneSample(DEFAULT_SAMPLE),
+  );
 
   const replace = useCallback((incoming: Scenario) => {
     // Backward-compat: JSON saved before the errorHandler field existed.
