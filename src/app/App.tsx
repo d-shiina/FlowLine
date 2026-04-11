@@ -17,6 +17,7 @@ import { SyncLine } from './components/SyncLine';
 import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
 import { SamplesModal } from './components/SamplesModal';
+import { GraphEdges } from './components/GraphEdges';
 import { Inspector } from './components/Inspector';
 
 /**
@@ -354,7 +355,7 @@ export default function App() {
               onCanvasClick={handleCanvasClick}
             />
 
-            {/* Sync overlay + global playhead (regular tracks only) */}
+            {/* DAG edges + sync overlay + global playhead (regular tracks only) */}
             <div
               className="pointer-events-none absolute"
               style={{
@@ -365,6 +366,15 @@ export default function App() {
                 zIndex: 9,
               }}
             >
+              <GraphEdges
+                tracks={scenario.tracks}
+                totalSlots={totalSlots}
+                selectedBlockId={
+                  selected && selected.trackId !== ERROR_HANDLER_ID
+                    ? selected.blockId
+                    : null
+                }
+              />
               {scenario.syncPoints.map((sp) => (
                 <div key={sp.id} className="pointer-events-auto">
                   <SyncLine
