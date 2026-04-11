@@ -5,27 +5,27 @@ import readline from 'node:readline';
 import { detectPython } from './pythonRuntime';
 
 /**
- * FLOWLINE Python worker manager.
- *
- * Spawns and keeps alive a Python subprocess running
- * ``_runtime/worker.py`` under the isolated ``_runtime/python/``
- * interpreter. Phase 2a-1 ships a single worker (the whole
- * scenario runs through it) — the track-level pool planned in
- * docs/03-nodes.md lands in a follow-up.
+ * FLOWLINE Python worker manager. Spawns and keeps alive a single
+ * Python subprocess running ``_runtime/worker.py`` under the isolated
+ * ``_runtime/python/`` interpreter.
  *
  * Lifecycle:
  *
  * 1. Renderer calls ``runtime:run-node`` with a request.
- * 2. Main process lazy-spawns the worker on the first request
- *    (so cold-start import cost isn't paid until the user hits
- *    Run for the first time).
- * 3. We wait for the worker's ``ready`` frame, cache the node
- *    manifest, then dispatch the request.
- * 4. Log / result frames are routed back to renderers listening
- *    on ``runtime:node-log`` / ``runtime:node-result``.
- * 5. Worker stays idle between runs. An idle timeout (5 min)
- *    kills it so long-lived sessions don't hog memory.
- * 6. On app quit we shut it down cleanly.
+ * 2. Main process lazy-spawns the worker on the first request so the
+ *    Python cold-start import cost isn't paid until the user hits Run.
+ * 3. We wait for the worker's ``ready`` frame, cache the node manifest,
+ *    then dispatch the request.
+ * 4. Log / result frames route back to renderers via
+ *    ``runtime:node-log`` / ``runtime:node-result``.
+ * 5. Worker stays idle between runs; a 5-minute idle timer reclaims it
+ *    so long-lived sessions don't hog memory.
+ * 6. ``before-quit`` in ``main.ts`` calls ``shutdownWorker()`` so the
+ *    subprocess exits cleanly.
+ *
+ * Multi-track parallelism (one worker per track) is intentionally not
+ * implemented yet — the single worker serialises all ``run_node``
+ * requests, which matches how the engine dispatches today.
  */
 
 // ── Frame types ────────────────────────────────────────────────────

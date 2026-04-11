@@ -22,22 +22,18 @@ interface Edge {
 /**
  * SVG overlay drawing dependency edges between blocks on regular tracks.
  * Edges render as thin curved paths from the source block's right edge
- * to the dependent block's left edge. Cross-track edges curve smoothly.
+ * to the dependent block's left edge.
  *
  * Block positions come from the shared ``computeTracksLayout`` helper
- * so container frames, lane-split children, and dynamic track
- * heights are all respected — the arrow lands on the actual visual
- * centre of its block, not the naive ``TRACK_H / 2`` approximation.
+ * so container frames, lane-split children, and dynamic track heights
+ * are all respected — arrows land on the actual visual centre of each
+ * block. Backward edges (dep slot ≥ target slot) fall back to a dashed
+ * straight line as a defensive render for legacy JSON imports; the
+ * editor itself can't produce them since the drag handler clamps to
+ * the legal slot range.
  *
- * Backward edges (dep slot ≥ target slot) *should* be impossible to
- * create through the editor — the drag handler clamps block positions
- * to their legal slot range, and the link tool swaps direction to
- * preserve left→right order. The dashed-straight-line fallback remains
- * only as a defensive render for JSON imports that might carry legacy
- * backward deps; users should never see it from fresh edits.
- *
- * Edges touching the selected block are highlighted. Rendering is
- * pointer-events: none — the overlay is purely visual.
+ * Edges touching the selected block are highlighted. The overlay is
+ * ``pointer-events: none`` — purely visual.
  */
 export function GraphEdges({ tracks, totalSlots, selectedBlockId }: Props) {
   const { edges, width, height } = useMemo(() => {

@@ -35,7 +35,7 @@ export interface UseNodeManifest {
  *    worker and receive the manifest. This also warms up imports so
  *    the first Run isn't a cold start.
  * 3. Cache the result in state. `refresh()` re-runs the spawn path
- *    when called explicitly (e.g. after a plugin install, Phase 4).
+ *    when called explicitly (e.g. after the node editor saves a file).
  *
  * The hook is deliberately non-throwing: start-up failures surface
  * as `error` and leave `manifest` empty so the UI keeps rendering.

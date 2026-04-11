@@ -53,7 +53,12 @@ export interface Block {
   id: string;
   type: BlockType;
   label: string;
-  /** Fully-qualified node id, e.g. "desktop/click". Phase 2 engine uses this. */
+  /**
+   * Fully-qualified node id, e.g. ``desktop/click``. When set, the
+   * engine dispatches this block to the Python worker via
+   * ``IpcRuntime``; when unset, the block falls back to ``MockRuntime``
+   * so legacy scenarios animate without touching Python.
+   */
   nodeId?: string;
   /** Visual slot on the track (0-indexed). Unique per track. */
   slot: number;

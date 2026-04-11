@@ -2,10 +2,10 @@ import type { Block } from '../types';
 import type { LogEntry } from './types';
 
 /**
- * A `Runtime` is the pluggable layer that actually "runs" a block. Phase 1
- * ships a mock runtime that just sleeps; Phase 2 swaps this for
- * `IpcRuntime`, which talks to a Python worker over stdin/stdout JSON via
- * the main process.
+ * A `Runtime` is the pluggable layer that actually "runs" a block.
+ * ``MockRuntime`` just sleeps with deterministic duration; ``IpcRuntime``
+ * (in ``ipcRuntime.ts``) dispatches to a Python worker over stdin/stdout
+ * JSON via the main process. ``useExecution`` picks one per Run.
  */
 export interface NodeContext {
   blockId: string;
