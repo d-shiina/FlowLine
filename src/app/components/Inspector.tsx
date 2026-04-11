@@ -1,5 +1,7 @@
 import type { Block, OnError } from '../types';
 import { BLOCK_META } from '../types';
+import { Select, type SelectOption } from './ui/Select';
+import { Checkbox } from './ui/Checkbox';
 
 interface Props {
   block: Block | null;
@@ -14,6 +16,7 @@ interface Props {
 }
 
 type OnErrorKey = 'abort' | 'skip' | 'ignore' | 'retry';
+type RetryThenKey = 'abort' | 'skip';
 
 function toKey(v: OnError | undefined): OnErrorKey {
   if (v === undefined) return 'abort';
@@ -35,7 +38,8 @@ function fromKey(k: OnErrorKey, current: OnError | undefined): OnError {
  * Right-side properties inspector for the selected block.
  *
  * For blocks inside the error handler track, `abort` is hidden from the
- * onError options (see docs/02-error-handling.md).
+ * onError options (see docs/02-error-handling.md). Uses Base UI's Select
+ * and Checkbox primitives via the thin wrappers in components/ui.
  */
 export function Inspector({
   block,
@@ -59,6 +63,24 @@ export function Inspector({
   const meta = BLOCK_META[block.type];
   const onErrorKey = toKey(block.onError);
   const hasTimeout = block.timeout !== undefined;
+
+  const onErrorOptions: SelectOption<OnErrorKey>[] = [
+    ...(isErrorHandler
+      ? []
+      : [{ value: 'abort' as const, label: '中断 (abort)' }]),
+    { value: 'skip', label: '次へ (skip)' },
+    { value: 'ignore', label: '無視 (ignore)' },
+    ...(isErrorHandler
+      ? []
+      : [{ value: 'retry' as const, label: 'リトライ (retry)' }]),
+  ];
+
+  const retryThenOptions: SelectOption<RetryThenKey>[] = [
+    ...(isErrorHandler
+      ? []
+      : [{ value: 'abort' as const, label: 'abort' }]),
+    { value: 'skip', label: 'skip' },
+  ];
 
   return (
     <aside className="flex h-full w-72 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-[#0f172a] bg-[#0a1020] p-4">
@@ -108,19 +130,18 @@ export function Inspector({
       </label>
 
       <div className="flex flex-col gap-1">
-        <label className="flex items-center gap-2 font-mono text-[10px] text-slate-400">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-2 font-mono text-[10px] text-slate-400">
+          <Checkbox
             checked={!!block.skipIfMissing}
-            onChange={(e) =>
+            onCheckedChange={(v) =>
               onChange(trackId, block.id, {
-                skipIfMissing: e.target.checked || undefined,
+                skipIfMissing: v || undefined,
               })
             }
-            className="accent-[#eab308]"
+            accent="#eab308"
           />
           ターゲットが見つからなくてもOK
-        </label>
+        </div>
         <span className="pl-5 font-mono text-[9px] text-slate-700">
           （想定内の不在は静かにスキップ）
         </span>
@@ -129,19 +150,18 @@ export function Inspector({
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between font-mono text-[9px] text-slate-600">
           <span>TIMEOUT (秒)</span>
-          <label className="flex items-center gap-1 text-[9px] text-slate-500">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-1 text-[9px] text-slate-500">
+            <Checkbox
               checked={hasTimeout}
-              onChange={(e) =>
+              onCheckedChange={(v) =>
                 onChange(trackId, block.id, {
-                  timeout: e.target.checked ? 30 : undefined,
+                  timeout: v ? 30 : undefined,
                 })
               }
-              className="accent-[#06b6d4]"
+              accent="#06b6d4"
             />
             個別設定
-          </label>
+          </div>
         </div>
         <input
           type="number"
@@ -151,30 +171,26 @@ export function Inspector({
           placeholder="engine default"
           onChange={(e) =>
             onChange(trackId, block.id, {
-              timeout: e.target.value ? Math.max(1, Number(e.target.value)) : undefined,
+              timeout: e.target.value
+                ? Math.max(1, Number(e.target.value))
+                : undefined,
             })
           }
           className="rounded-md border border-[#334155] bg-[#0f172a] px-2 py-1 font-mono text-[11px] text-slate-200 outline-none disabled:opacity-40"
         />
       </div>
 
-      <label className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1">
         <span className="font-mono text-[9px] text-slate-600">ON ERROR</span>
-        <select
+        <Select<OnErrorKey>
           value={onErrorKey}
-          onChange={(e) => {
-            const k = e.target.value as OnErrorKey;
+          onValueChange={(k) =>
             onChange(trackId, block.id, {
               onError: fromKey(k, block.onError),
-            });
-          }}
-          className="rounded-md border border-[#334155] bg-[#0f172a] px-2 py-1 font-mono text-[11px] text-slate-200 outline-none"
-        >
-          {!isErrorHandler && <option value="abort">中断 (abort)</option>}
-          <option value="skip">次へ (skip)</option>
-          <option value="ignore">無視 (ignore)</option>
-          {!isErrorHandler && <option value="retry">リトライ (retry)</option>}
-        </select>
+            })
+          }
+          options={onErrorOptions}
+        />
         {isErrorHandler && (
           <span className="font-mono text-[9px] text-[#f43f5e88]">
             エラー処理内では abort / retry は無効
@@ -191,31 +207,30 @@ export function Inspector({
                 onChange(trackId, block.id, {
                   onError: {
                     retry: Math.max(1, Number(e.target.value)),
-                    then: (block.onError as { then: 'abort' | 'skip' }).then,
+                    then: (block.onError as { then: RetryThenKey }).then,
                   },
                 })
               }
               className="w-12 rounded border border-[#334155] bg-[#0f172a] px-1 py-0.5 text-center font-mono text-[10px] text-slate-200 outline-none"
             />
             回 →
-            <select
-              value={block.onError.then}
-              onChange={(e) =>
-                onChange(trackId, block.id, {
-                  onError: {
-                    retry: (block.onError as { retry: number }).retry,
-                    then: e.target.value as 'abort' | 'skip',
-                  },
-                })
-              }
-              className="rounded border border-[#334155] bg-[#0f172a] px-1 py-0.5 font-mono text-[10px] text-slate-200 outline-none"
-            >
-              {!isErrorHandler && <option value="abort">abort</option>}
-              <option value="skip">skip</option>
-            </select>
+            <div className="flex-1">
+              <Select<RetryThenKey>
+                value={block.onError.then}
+                onValueChange={(then) =>
+                  onChange(trackId, block.id, {
+                    onError: {
+                      retry: (block.onError as { retry: number }).retry,
+                      then,
+                    },
+                  })
+                }
+                options={retryThenOptions}
+              />
+            </div>
           </div>
         )}
-      </label>
+      </div>
 
       <div className="flex flex-col gap-1">
         <span className="font-mono text-[9px] text-slate-600">DEPS (DAG)</span>

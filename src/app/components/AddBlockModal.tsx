@@ -7,6 +7,7 @@ import {
   type Subroutine,
 } from '../types';
 import { uid } from '../useScenario';
+import { Select, type SelectOption } from './ui/Select';
 
 interface Props {
   open: boolean;
@@ -128,18 +129,18 @@ export function AddBlockModal({
                 呼び出すサブルーチン
               </div>
               {canAddSubroutineCall ? (
-                <select
+                <Select<string>
                   value={subroutineId}
-                  onChange={(e) => setSubroutineId(e.target.value)}
-                  className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-2.5 py-1.5 font-mono text-[11px] text-slate-200 outline-none"
-                >
-                  <option value="">(選択してください)</option>
-                  {subroutines.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.blocks.length} blocks)
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setSubroutineId}
+                  placeholder="(選択してください)"
+                  options={
+                    subroutines.map((s) => ({
+                      value: s.id,
+                      label: `${s.name} (${s.blocks.length} blocks)`,
+                    })) as SelectOption<string>[]
+                  }
+                  triggerClassName="flex w-full items-center justify-between rounded-lg border border-[#334155] bg-[#0f172a] px-2.5 py-1.5 font-mono text-[11px] text-slate-200 outline-none transition-colors hover:border-[#475569] data-[popup-open]:border-[#3B82F6]"
+                />
               ) : (
                 <div className="rounded-lg border border-dashed border-[#334155] bg-[#0f172a] p-3 text-center font-mono text-[10px] text-slate-600">
                   左サイドバーから先にサブルーチンを定義してください
