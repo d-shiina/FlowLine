@@ -1,0 +1,52 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', ui-monospace, monospace;
+
+  /* FLOWLINE palette */
+  --color-fl-bg: #060c1a;
+  --color-fl-panel: #0a1020;
+  --color-fl-border: #0f172a;
+  --color-fl-rail: #1e293b;
+  --color-fl-muted: #334155;
+
+  /* block type colors */
+  --color-fl-action: #3b82f6;
+  --color-fl-wait: #06b6d4;
+  --color-fl-loop: #8b5cf6;
+  --color-fl-branch: #f59e0b;
+  --color-fl-sync: #f43f5e;
+  --color-fl-sub: #94a3b8;
+  --color-fl-play: #22c55e;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--color-fl-bg);
+  color: #e2e8f0;
+  font-family: var(--font-mono);
+  overflow: hidden;
+}
+
+/* hide scrollbar chrome but keep scrolling */
+.fl-scroll::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+.fl-scroll::-webkit-scrollbar-track {
+  background: #0a1020;
+}
+.fl-scroll::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 6px;
+}
+.fl-scroll::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
