@@ -219,3 +219,72 @@ export function evalBool(
 ): boolean {
   return truthy(evalJsonLogic(expr, opts));
 }
+
+/**
+ * Render a JSON Logic expression as a compact human-readable line
+ * for display on container frame headers. Returns an empty string
+ * when the expression is missing. The output is a best-effort
+ * single-line infix form — complex expressions fall back to the
+ * top-level operator name so the header never blows up, even on
+ * nested nonsense.
+ */
+export function summarizeExpression(expr: JsonLogicExpr): string {
+  if (expr === null || expr === undefined) return '';
+  if (typeof expr !== 'object') {
+    if (typeof expr === 'string') return JSON.stringify(expr);
+    return String(expr);
+  }
+  if (Array.isArray(expr)) return '';
+  const obj = expr as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  if (keys.length !== 1) return '';
+  const op = keys[0];
+  const raw = obj[op];
+
+  if (op === 'var') {
+    if (typeof raw === 'string') return raw;
+    if (Array.isArray(raw) && typeof raw[0] === 'string') return String(raw[0]);
+    return 'var';
+  }
+
+  const args = Array.isArray(raw) ? raw : [raw];
+
+  // Binary comparisons / arithmetic render as infix.
+  const INFIX = new Set([
+    '==',
+    '===',
+    '!=',
+    '!==',
+    '<',
+    '<=',
+    '>',
+    '>=',
+    '+',
+    '-',
+    '*',
+    '/',
+    '%',
+    'in',
+  ]);
+  if (INFIX.has(op) && args.length === 2) {
+    return `${summarizeExpression(args[0])} ${op} ${summarizeExpression(args[1])}`;
+  }
+
+  if ((op === 'and' || op === 'or') && args.length >= 1) {
+    return args.map((a) => summarizeExpression(a)).join(` ${op} `);
+  }
+
+  if ((op === '!' || op === 'not') && args.length >= 1) {
+    return `!${summarizeExpression(args[0])}`;
+  }
+
+  if (op === 'cat' && args.length >= 1) {
+    return args.map((a) => summarizeExpression(a)).join(' + ');
+  }
+
+  if (op === 'if' && args.length >= 2) {
+    return `if ${summarizeExpression(args[0])} then ${summarizeExpression(args[1])}`;
+  }
+
+  return op;
+}

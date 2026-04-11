@@ -3,6 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import type { Block, Subroutine, Track } from '../types';
 import { BLOCK_META } from '../types';
 import type { BlockStatus } from '../engine';
+import { summarizeExpression } from '../engine/jsonLogic';
 import {
   BLOCK_MARGIN,
   HEADER_W,
@@ -46,6 +47,16 @@ interface Props {
     /** Container the click landed inside, if any. */
     parent?: { blockId: string; branch?: 'then' | 'else' },
   ) => void;
+  /**
+   * Drag the container frame header left/right by an integer
+   * slot delta. The store's moveBlockTree cascades the shift to
+   * every descendant so the whole container slides as one.
+   */
+  onMoveContainerTree: (
+    trackId: string,
+    rootBlockId: string,
+    delta: number,
+  ) => void;
 }
 
 export function TrackRow({
@@ -65,6 +76,7 @@ export function TrackRow({
   onDeleteBlock,
   onSelectBlock,
   onCanvasClick,
+  onMoveContainerTree,
 }: Props) {
   const [renaming, setRenaming] = useState(false);
   const [nameVal, setNameVal] = useState(track.name);
@@ -135,17 +147,28 @@ export function TrackRow({
 
       // A tiny one-line description rendered on the header's right
       // edge so the user can tell loops with different iteration
-      // counts apart without opening the Inspector.
+      // counts apart without opening the Inspector. Branches show
+      // a compact form of their condition; switches show their
+      // case count; loops show iteration count or `while` marker.
       let summary = '';
       if (parent.type === 'loop') {
         if (rawParams.whileCondition !== undefined) {
-          summary = 'while';
+          const s = summarizeExpression(rawParams.whileCondition);
+          summary = s ? `while ${s}` : 'while';
         } else if (typeof rawParams.iterations === 'number') {
           summary = `× ${rawParams.iterations}`;
         }
+      } else if (parent.type === 'branch') {
+        const s = summarizeExpression(rawParams.condition);
+        if (s) summary = s;
       } else if (parent.type === 'switch') {
-        summary = `${cases.length} cases`;
+        const s = summarizeExpression(rawParams.expression);
+        summary = s ? `${s} → ${cases.length}` : `${cases.length} cases`;
       }
+      // Hard-cap the summary so a very long condition doesn't
+      // overflow the header bar. The Inspector shows the full
+      // expression when the user wants to inspect it.
+      if (summary.length > 32) summary = summary.slice(0, 30) + '…';
 
       frames.push({
         block: parent,
@@ -404,10 +427,15 @@ export function TrackRow({
                   : f.label
               }
             >
-              {/* Header bar — click-selectable */}
-              <button
-                type="button"
-                className="pointer-events-auto absolute left-0 right-0 top-0 flex cursor-pointer items-center gap-1 px-1.5 text-left"
+              {/* Header bar — click-selectable, drag-to-move. A
+                  press-drag-release moves the container + every
+                  descendant by the rounded slot delta; a press-
+                  release without movement is treated as a plain
+                  click so the Inspector still opens on tap. */}
+              <div
+                role="button"
+                tabIndex={0}
+                className="pointer-events-auto absolute left-0 right-0 top-0 flex cursor-grab items-center gap-1 px-1.5 text-left active:cursor-grabbing"
                 style={{
                   height: headerH,
                   background: `${f.color}${selected || running ? '3a' : '22'}`,
@@ -415,7 +443,30 @@ export function TrackRow({
                 }}
                 onMouseDown={(e) => {
                   e.stopPropagation();
+                  e.preventDefault();
                   onSelectBlock(track.id, f.block.id);
+                  if (!blocksDraggable) return;
+
+                  const startX = e.clientX;
+                  let didMove = false;
+                  let delta = 0;
+                  const onMove = (ev: MouseEvent) => {
+                    const raw = Math.round(
+                      (ev.clientX - startX) / SLOT_PX,
+                    );
+                    if (raw === delta) return;
+                    delta = raw;
+                    didMove = didMove || raw !== 0;
+                  };
+                  const onUp = () => {
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                    if (didMove && delta !== 0) {
+                      onMoveContainerTree(track.id, f.block.id, delta);
+                    }
+                  };
+                  window.addEventListener('mousemove', onMove);
+                  window.addEventListener('mouseup', onUp);
                 }}
               >
                 <span
@@ -439,7 +490,7 @@ export function TrackRow({
                     title="実行中"
                   />
                 )}
-              </button>
+              </div>
 
               {/* Lane dividers + per-lane labels */}
               {multiLane &&

@@ -686,6 +686,154 @@ function BranchParamsSection({
   );
 }
 
+interface SwitchExpressionEditorProps {
+  value: unknown;
+  scenarioVariables: Record<string, unknown>;
+  onChange: (next: unknown) => void;
+}
+
+/**
+ * Compact editor for a switch's evaluation expression. The common
+ * case is a plain variable reference (``{ var: "scenario.status" }``),
+ * so the default mode is a single-line text input with a datalist
+ * of scenario variable keys — the user types ``scenario.status`` and
+ * the widget serialises to the right JSON Logic shape.
+ *
+ * A 詳細 toggle exposes a raw JSON textarea for arbitrary
+ * expressions (arithmetic, nested ops) that don't fit the simple
+ * var shape. Switching modes preserves the current value whenever
+ * possible.
+ */
+function SwitchExpressionEditor({
+  value,
+  scenarioVariables,
+  onChange,
+}: SwitchExpressionEditorProps) {
+  // Detect whether the current value is a simple var reference.
+  // Everything else forces raw mode on mount.
+  const asVar =
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value as Record<string, unknown>).length === 1 &&
+    (value as Record<string, unknown>).var !== undefined
+      ? String((value as { var: unknown }).var)
+      : null;
+  const canBuildMode = asVar !== null || value === undefined;
+  const [rawForced, setRawForced] = useState(!canBuildMode);
+  const raw = rawForced || !canBuildMode;
+
+  const [localVar, setLocalVar] = useState(asVar ?? '');
+  const [localRaw, setLocalRaw] = useState(
+    value === undefined ? '' : JSON.stringify(value, null, 2),
+  );
+  const [rawError, setRawError] = useState<string | null>(null);
+
+  // Resync when the external value changes identity.
+  const identity = JSON.stringify(value ?? null);
+  useEffect(() => {
+    setLocalVar(asVar ?? '');
+    setLocalRaw(value === undefined ? '' : JSON.stringify(value, null, 2));
+    setRawError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity]);
+
+  const knownKeys = Object.keys(scenarioVariables)
+    .sort()
+    .map((k) => `scenario.${k}`);
+
+  const commitVar = () => {
+    const trimmed = localVar.trim();
+    if (trimmed === '') {
+      onChange(undefined);
+      return;
+    }
+    onChange({ var: trimmed });
+  };
+
+  const commitRaw = () => {
+    const trimmed = localRaw.trim();
+    if (trimmed === '') {
+      onChange(undefined);
+      setRawError(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      onChange(parsed);
+      setRawError(null);
+    } catch (e) {
+      setRawError((e as Error).message);
+    }
+  };
+
+  if (raw) {
+    return (
+      <div className="flex flex-col gap-1">
+        <textarea
+          value={localRaw}
+          onChange={(e) => setLocalRaw(e.target.value)}
+          onBlur={commitRaw}
+          spellCheck={false}
+          rows={3}
+          placeholder='{ "var": "scenario.status" }'
+          className="resize-none rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[10px] leading-relaxed text-fl-text outline-none"
+        />
+        <div className="flex items-center justify-between gap-2">
+          {rawError ? (
+            <span className="flex-1 font-mono text-[9px] text-[#ef4444]">
+              {rawError}
+            </span>
+          ) : (
+            <span className="flex-1 font-mono text-[8px] text-fl-text-ghost">
+              生の JSON Logic 式を入力
+            </span>
+          )}
+          {canBuildMode && (
+            <button
+              type="button"
+              onClick={() => setRawForced(false)}
+              className="font-mono text-[8px] text-fl-text-ghost hover:text-fl-text-faint"
+            >
+              ‹ シンプル
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const datalistId = 'switch-expr-vars';
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        value={localVar}
+        onChange={(e) => setLocalVar(e.target.value)}
+        onBlur={commitVar}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        placeholder="scenario.xxx"
+        list={datalistId}
+        className="min-w-0 flex-1 rounded border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none focus:border-[#3b82f6]"
+      />
+      <datalist id={datalistId}>
+        {knownKeys.map((k) => (
+          <option key={k} value={k} />
+        ))}
+      </datalist>
+      <button
+        type="button"
+        onClick={() => setRawForced(true)}
+        className="flex-shrink-0 font-mono text-[8px] text-fl-text-ghost hover:text-fl-text-faint"
+        title="JSON Logic 式を直接編集"
+      >
+        詳細 ›
+      </button>
+    </div>
+  );
+}
+
 interface SwitchParamsProps {
   block: Block;
   scenarioVariables: Record<string, unknown>;
@@ -710,6 +858,7 @@ interface SwitchParamsProps {
  */
 function SwitchParamsSection({
   block,
+  scenarioVariables,
   onChange,
 }: SwitchParamsProps) {
   const params =
@@ -718,39 +867,16 @@ function SwitchParamsSection({
     ? (params.cases as unknown[]).map((c) => String(c))
     : [];
 
-  const initialExpression =
-    params.expression === undefined
-      ? ''
-      : JSON.stringify(params.expression, null, 2);
-  const [localExpr, setLocalExpr] = useState(initialExpression);
-  const [exprError, setExprError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLocalExpr(initialExpression);
-    setExprError(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block.id, initialExpression]);
-
-  const commitExpression = () => {
-    const trimmed = localExpr.trim();
+  const commitExpression = (next: unknown) => {
     const nextParams: Record<string, unknown> = { ...params };
-    if (trimmed === '') {
+    if (next === undefined) {
       delete nextParams.expression;
-      onChange({
-        params:
-          Object.keys(nextParams).length > 0 ? nextParams : undefined,
-      });
-      setExprError(null);
-      return;
+    } else {
+      nextParams.expression = next;
     }
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      nextParams.expression = parsed;
-      onChange({ params: nextParams });
-      setExprError(null);
-    } catch (e) {
-      setExprError((e as Error).message);
-    }
+    onChange({
+      params: Object.keys(nextParams).length > 0 ? nextParams : undefined,
+    });
   };
 
   const commitCases = (nextCases: string[]) => {
@@ -791,23 +917,12 @@ function SwitchParamsSection({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-col gap-1">
-        <span className="font-mono text-[9px] text-fl-text-faint">
-          評価式 (JSON Logic)
-        </span>
-        <textarea
-          value={localExpr}
-          onChange={(e) => setLocalExpr(e.target.value)}
-          onBlur={commitExpression}
-          spellCheck={false}
-          rows={3}
-          placeholder='{ "var": "scenario.status" }'
-          className="resize-none rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[10px] leading-relaxed text-fl-text outline-none"
+        <span className="font-mono text-[9px] text-fl-text-faint">評価式</span>
+        <SwitchExpressionEditor
+          value={params.expression}
+          scenarioVariables={scenarioVariables}
+          onChange={commitExpression}
         />
-        {exprError && (
-          <span className="font-mono text-[9px] text-[#ef4444]">
-            {exprError}
-          </span>
-        )}
       </div>
 
       <div className="flex flex-col gap-1">

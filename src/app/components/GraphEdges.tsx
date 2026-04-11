@@ -1,18 +1,12 @@
 import { useMemo } from 'react';
 import type { Track } from '../types';
-import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, TRACK_H } from '../layout';
+import { SLOT_PX } from '../layout';
+import { computeTracksLayout } from '../trackLayout';
 
 interface Props {
   tracks: Track[];
   totalSlots: number;
   selectedBlockId: string | null;
-}
-
-interface BlockPos {
-  trackIndex: number;
-  leftX: number;
-  rightX: number;
-  centerY: number;
 }
 
 interface Edge {
@@ -30,6 +24,11 @@ interface Edge {
  * Edges render as thin curved paths from the source block's right edge
  * to the dependent block's left edge. Cross-track edges curve smoothly.
  *
+ * Block positions come from the shared ``computeTracksLayout`` helper
+ * so container frames, lane-split children, and dynamic track
+ * heights are all respected — the arrow lands on the actual visual
+ * centre of its block, not the naive ``TRACK_H / 2`` approximation.
+ *
  * Backward edges (dep slot ≥ target slot) *should* be impossible to
  * create through the editor — the drag handler clamps block positions
  * to their legal slot range, and the link tool swaps direction to
@@ -42,35 +41,24 @@ interface Edge {
  */
 export function GraphEdges({ tracks, totalSlots, selectedBlockId }: Props) {
   const { edges, width, height } = useMemo(() => {
-    const positions = new Map<string, BlockPos>();
-    tracks.forEach((track, ti) => {
-      for (const b of track.blocks) {
-        const leftX = b.slot * SLOT_PX + BLOCK_MARGIN;
-        positions.set(b.id, {
-          trackIndex: ti,
-          leftX,
-          rightX: leftX + BLOCK_W,
-          centerY: ti * TRACK_H + TRACK_H / 2,
-        });
-      }
-    });
+    const layout = computeTracksLayout(tracks);
 
     const out: Edge[] = [];
     for (const track of tracks) {
       for (const b of track.blocks) {
-        const toPos = positions.get(b.id);
+        const toPos = layout.positions.get(b.id);
         if (!toPos) continue;
         for (const depId of b.deps) {
-          const fromPos = positions.get(depId);
+          const fromPos = layout.positions.get(depId);
           if (!fromPos) continue;
           out.push({
             key: `${depId}->${b.id}`,
             fromId: depId,
             toId: b.id,
             x1: fromPos.rightX,
-            y1: fromPos.centerY,
+            y1: fromPos.y,
             x2: toPos.leftX,
-            y2: toPos.centerY,
+            y2: toPos.y,
           });
         }
       }
@@ -79,7 +67,7 @@ export function GraphEdges({ tracks, totalSlots, selectedBlockId }: Props) {
     return {
       edges: out,
       width: totalSlots * SLOT_PX,
-      height: tracks.length * TRACK_H,
+      height: layout.totalHeight,
     };
   }, [tracks, totalSlots]);
 

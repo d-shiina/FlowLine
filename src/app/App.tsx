@@ -11,6 +11,7 @@ import { useScenario, uid } from './useScenario';
 import { useTheme } from './useTheme';
 import { useExecution } from './engine';
 import { useNodeManifest } from './useNodeManifest';
+import { computeTracksLayout } from './trackLayout';
 import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Titlebar } from './components/Titlebar';
@@ -623,8 +624,13 @@ export default function App() {
   // ─── render ────────────────────────────────────────────────────────
   const canvasWidth = totalSlots * SLOT_PX + HEADER_W;
   // Sync overlay spans regular tracks only — not the error handler,
-  // which runs separately on abort.
-  const regularTrackHeight = scenario.tracks.length * TRACK_H;
+  // which runs separately on abort. Track heights are dynamic now
+  // (switches/branches grow their row), so we sum the per-track
+  // computed heights instead of the old TRACK_H constant.
+  const regularTrackHeight = useMemo(
+    () => computeTracksLayout(scenario.tracks).totalHeight,
+    [scenario.tracks],
+  );
 
   const phaseLabel =
     execution.state.phase === 'running'
@@ -788,6 +794,7 @@ export default function App() {
                     }}
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
+                    onMoveContainerTree={store.moveBlockTree}
                   />
                 ))}
 
@@ -845,6 +852,7 @@ export default function App() {
                   }}
                   onSelectBlock={handleBlockClick}
                   onCanvasClick={handleCanvasClick}
+                  onMoveContainerTree={store.moveBlockTree}
                 />
 
                 {/* DAG edges + sync overlay + global playhead */}
@@ -902,6 +910,7 @@ export default function App() {
                     }}
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
+                    onMoveContainerTree={store.moveBlockTree}
                   />
 
                   {/* DAG edges for the subroutine's single track */}

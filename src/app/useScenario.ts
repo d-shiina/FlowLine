@@ -150,6 +150,11 @@ export interface ScenarioStore {
     patch: Partial<Block>,
   ) => void;
   deleteBlock: (trackId: string, blockId: string) => void;
+  moveBlockTree: (
+    trackId: string,
+    rootBlockId: string,
+    delta: number,
+  ) => void;
 
   addDep: (trackId: string, blockId: string, depId: string) => void;
   removeDep: (trackId: string, blockId: string, depId: string) => void;
@@ -356,6 +361,59 @@ export function useScenario(): ScenarioStore {
     [commit],
   );
 
+  /**
+   * Shift a container block and every descendant it owns by the
+   * given slot delta. Used by the draggable container frame
+   * header: dragging the loop's header left by 2 slots carries
+   * the entire loop body along so the user doesn't have to
+   * reposition every child block one by one.
+   *
+   * Walks the parent chain in-container to collect the descendant
+   * set, then applies the delta uniformly. Negative deltas clamp
+   * against slot 0 so children can't be pushed off the canvas.
+   */
+  const moveBlockTree = useCallback(
+    (containerId: string, rootId: string, delta: number) => {
+      if (delta === 0) return;
+      commit((s) =>
+        mapContainerBlocks(s, containerId, (blocks) => {
+          // BFS: start from the root block, pull in anything whose
+          // parentBlockId points at a member until no new members
+          // are discovered.
+          const toMove = new Set<string>([rootId]);
+          for (;;) {
+            let grew = false;
+            for (const b of blocks) {
+              if (
+                b.parentBlockId &&
+                toMove.has(b.parentBlockId) &&
+                !toMove.has(b.id)
+              ) {
+                toMove.add(b.id);
+                grew = true;
+              }
+            }
+            if (!grew) break;
+          }
+          // Clamp the minimum landing slot so the cluster can't
+          // fall off the left edge. We find the smallest slot
+          // among the moved set and adjust delta accordingly.
+          let minSlot = Number.POSITIVE_INFINITY;
+          for (const b of blocks) {
+            if (toMove.has(b.id)) minSlot = Math.min(minSlot, b.slot);
+          }
+          const effectiveDelta =
+            minSlot + delta < 0 ? -minSlot : delta;
+          if (effectiveDelta === 0) return blocks;
+          return blocks.map((b) =>
+            toMove.has(b.id) ? { ...b, slot: b.slot + effectiveDelta } : b,
+          );
+        }),
+      );
+    },
+    [commit],
+  );
+
   const deleteBlock = useCallback(
     (containerId: string, blockId: string) => {
       commit((s) => {
@@ -493,6 +551,7 @@ export function useScenario(): ScenarioStore {
     addBlock,
     updateBlock,
     deleteBlock,
+    moveBlockTree,
     addDep,
     removeDep,
     addSync,
