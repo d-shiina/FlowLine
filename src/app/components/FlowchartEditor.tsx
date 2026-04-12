@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { Block, Step, Subroutine } from '../types';
+import type { BlockStatus } from '../engine';
 import type { NodeManifestEntry } from '../../globals';
 import { Breadcrumb } from './Breadcrumb';
 import { FlowchartStepView, StepConnector } from './FlowchartStepView';
@@ -18,6 +19,8 @@ interface Props {
   subroutines: Subroutine[];
   nodeManifest: NodeManifestEntry[];
   scenarioVariables: Record<string, unknown>;
+  /** Live execution status map (blockId/stepId → status). */
+  executionStatus: Record<string, BlockStatus>;
   onBack: () => void;
   onUpdateBlock: (patch: Partial<Block>) => void;
   onCreateVariable: (key: string, value: unknown) => void;
@@ -115,6 +118,7 @@ export function FlowchartEditor({
   subroutines,
   nodeManifest,
   scenarioVariables,
+  executionStatus,
   onBack,
   onUpdateBlock,
 }: Props) {
@@ -703,7 +707,8 @@ export function FlowchartEditor({
                         .sort((a, b) => a.order - b.order)}
                       selected={selectedIds.includes(step.id)}
                       selectedStepId={selectedStepId}
-                      status="idle"
+                      status={executionStatus[step.id] ?? 'idle'}
+                      executionStatus={executionStatus}
                       dropTarget={
                         dropTarget?.kind === 'group' &&
                         dropTarget.groupId === step.id
@@ -720,7 +725,7 @@ export function FlowchartEditor({
                     <FlowchartStepView
                       step={step}
                       selected={selectedIds.includes(step.id)}
-                      status="idle"
+                      status={executionStatus[step.id] ?? 'idle'}
                       onSelect={(id) => handleSelect(id)}
                       onDelete={handleDeleteStep}
                       onDragStart={handleDragStart}
@@ -784,7 +789,7 @@ export function FlowchartEditor({
                   <FlowchartStepView
                     step={step}
                     selected={selectedIds.includes(step.id)}
-                    status="idle"
+                    status={executionStatus[step.id] ?? 'idle'}
                     onSelect={(id) => handleSelect(id)}
                     onDelete={handleDeleteStep}
                     onDragStart={handleDragStart}

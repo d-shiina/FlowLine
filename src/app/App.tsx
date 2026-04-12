@@ -499,6 +499,7 @@ export default function App() {
             subroutines={scenario.subroutines}
             nodeManifest={nodeManifest}
             scenarioVariables={scenario.variables.scenario}
+            executionStatus={blockStatus}
             onBack={() => setEditingBlock(null)}
             onUpdateBlock={(patch) => {
               store.updateBlock(

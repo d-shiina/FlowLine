@@ -12,6 +12,8 @@ interface Props {
   selected: boolean;
   selectedStepId: string | null;
   status: BlockStatus;
+  /** Live execution status map for resolving child step statuses. */
+  executionStatus?: Record<string, BlockStatus>;
   /** Whether this group is highlighted as a drop target. */
   dropTarget?: boolean;
   onSelect: (stepId: string) => void;
@@ -32,6 +34,7 @@ export function FlowchartGroupView({
   childSteps,
   selected,
   selectedStepId,
+  executionStatus,
   dropTarget,
   onSelect,
   onDelete,
@@ -114,7 +117,7 @@ export function FlowchartGroupView({
                   <FlowchartStepView
                     step={child}
                     selected={selectedStepId === child.id}
-                    status="idle"
+                    status={executionStatus?.[child.id] ?? 'idle'}
                     onSelect={onSelect}
                     onDelete={onDelete}
                     onDragStart={onDragStart}
