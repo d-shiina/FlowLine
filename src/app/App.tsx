@@ -5,7 +5,6 @@ import {
   MIN_SLOTS,
   RULER_H,
   SLOT_PX,
-  TRACK_H,
 } from './layout';
 import { useScenario, uid } from './useScenario';
 import { useTheme } from './useTheme';
@@ -27,7 +26,6 @@ import { VariablesModal } from './components/VariablesModal';
 import { NodeEditor } from './components/NodeEditor';
 import { PythonInstallModal } from './components/PythonInstallModal';
 import type { PythonStatus } from '../globals';
-import { GraphEdges } from './components/GraphEdges';
 import { SubroutineSidebar } from './components/SubroutineSidebar';
 import { Inspector } from './components/Inspector';
 import { ExecutionLogPanel } from './components/ExecutionLogPanel';
@@ -41,29 +39,6 @@ import { ExecutionLogPanel } from './components/ExecutionLogPanel';
 type EditorMode =
   | { type: 'scenario' }
   | { type: 'subroutine'; id: string };
-
-/**
- * Locate a block anywhere in the scenario and return it together with
- * its owning container id. Used by the link tool to decide which end
- * of a new dep edge should be the dependent so the arrow always
- * points left→right.
- */
-function findBlockById(
-  scenario: Scenario,
-  blockId: string,
-): { block: Block; containerId: string } | null {
-  for (const t of scenario.tracks) {
-    const hit = t.blocks.find((b) => b.id === blockId);
-    if (hit) return { block: hit, containerId: t.id };
-  }
-  const eh = scenario.errorHandler.blocks.find((b) => b.id === blockId);
-  if (eh) return { block: eh, containerId: ERROR_HANDLER_ID };
-  for (const sub of scenario.subroutines) {
-    const hit = sub.blocks.find((b) => b.id === blockId);
-    if (hit) return { block: hit, containerId: sub.id };
-  }
-  return null;
-}
 
 export default function App() {
   const store = useScenario();
@@ -90,8 +65,8 @@ export default function App() {
     }
   }, [editorMode, scenario.subroutines]);
 
-  // Synthesize a Track wrapper so the TrackRow / BlockView / GraphEdges
-  // components can treat the subroutine's flat block list as a track.
+  // Synthesize a Track wrapper so the TrackRow / BlockView components
+  // can treat the subroutine's flat block list as a track.
   const subroutineTrack: Track | null = activeSubroutine
     ? {
         id: activeSubroutine.id,
@@ -106,64 +81,6 @@ export default function App() {
   const playing = execution.running;
   const blockStatus = execution.state.status;
   const currentSlotByTrack = execution.state.currentSlot;
-
-  // For each block, compute the range of slots it can legally occupy
-  // without inverting any dep arrow. `min` is one past the rightmost
-  // block it depends on; `max` is one before the leftmost block that
-  // depends on it. Bounds are global (deps can cross tracks), so we
-  // look at every block regardless of container. Subroutines are
-  // self-contained graphs, so they're computed separately.
-  //
-  // The drag handler reads this via BlockView's `slotBounds` prop and
-  // clamps the target slot so L→R order is always preserved — the
-  // "backward arrow" case that used to be rendered as a dashed user-
-  // error line simply can't be constructed through dragging anymore.
-  const blockSlotBounds = useMemo(() => {
-    const acc: Record<string, { min: number; max: number }> = {};
-
-    // Compute bounds for one isolated dep graph (an array of block
-    // arrays that share a single dep namespace). Main graph = regular
-    // tracks + error handler. Each subroutine is its own graph.
-    const computeFor = (containers: Block[][]) => {
-      const slotOf = new Map<string, number>();
-      const dependentsOf = new Map<string, string[]>();
-      for (const blocks of containers) {
-        for (const b of blocks) slotOf.set(b.id, b.slot);
-      }
-      for (const blocks of containers) {
-        for (const b of blocks) {
-          for (const d of b.deps) {
-            const arr = dependentsOf.get(d);
-            if (arr) arr.push(b.id);
-            else dependentsOf.set(d, [b.id]);
-          }
-        }
-      }
-      for (const blocks of containers) {
-        for (const b of blocks) {
-          let min = 0;
-          for (const d of b.deps) {
-            const ds = slotOf.get(d);
-            if (ds !== undefined) min = Math.max(min, ds + 1);
-          }
-          let max = Number.POSITIVE_INFINITY;
-          for (const did of dependentsOf.get(b.id) ?? []) {
-            const ds = slotOf.get(did);
-            if (ds !== undefined) max = Math.min(max, ds - 1);
-          }
-          acc[b.id] = { min, max };
-        }
-      }
-    };
-
-    computeFor([
-      ...scenario.tracks.map((t) => t.blocks),
-      scenario.errorHandler.blocks,
-    ]);
-    for (const sub of scenario.subroutines) computeFor([sub.blocks]);
-
-    return acc;
-  }, [scenario]);
 
   const totalSlots = useMemo(() => {
     let max = MIN_SLOTS;
@@ -197,15 +114,7 @@ export default function App() {
   }, [execution, scenario]);
 
   // ─── mode + modals ─────────────────────────────────────────────────
-  const [mode, setModeState] = useState<EditMode>('block');
-  const [linkSource, setLinkSource] = useState<{
-    trackId: string;
-    blockId: string;
-  } | null>(null);
-  const setMode = useCallback((m: EditMode) => {
-    setModeState(m);
-    setLinkSource(null);
-  }, []);
+  const [mode, setMode] = useState<EditMode>('block');
   const [addModal, setAddModal] = useState<{
     trackId: string;
     trackName: string;
@@ -285,39 +194,11 @@ export default function App() {
     return { cases, type: parent.type };
   }, [selectedBlock, selected, scenario]);
 
-  /**
-   * Resolve a dep id back to a human-readable label ("label #slot") by
-   * walking every block container. Used by the Inspector deps list.
-   */
-  const resolveDepLabel = useCallback(
-    (depId: string): string => {
-      const search = (blocks: Block[]) =>
-        blocks.find((b) => b.id === depId);
-      for (const t of scenario.tracks) {
-        const hit = search(t.blocks);
-        if (hit) return `${hit.label} #${hit.slot}`;
-      }
-      const ehHit = search(scenario.errorHandler.blocks);
-      if (ehHit) return `${ehHit.label} #${ehHit.slot}`;
-      for (const sub of scenario.subroutines) {
-        const hit = search(sub.blocks);
-        if (hit) return `${hit.label} #${hit.slot}`;
-      }
-      return depId;
-    },
-    [scenario],
-  );
-
   const handleCanvasClick = (
     trackId: string,
     slot: number,
     parent?: { blockId: string; branch?: 'then' | 'else' },
   ) => {
-    // In link mode, clicking empty canvas cancels the pending link source.
-    if (mode === 'link') {
-      setLinkSource(null);
-      return;
-    }
     // The error handler track ignores sync mode — sync points don't apply.
     if (trackId === ERROR_HANDLER_ID) {
       setAddModal({
@@ -355,47 +236,12 @@ export default function App() {
     }
   };
 
-  /**
-   * Click handler for blocks. In normal/sync mode this just selects the
-   * block. In link mode the first click sets the link source and the
-   * second click creates a dep edge (second block depends on first).
-   */
+  /** Click handler for blocks — selects the clicked block. */
   const handleBlockClick = useCallback(
     (trackId: string, blockId: string) => {
-      if (mode === 'link') {
-        if (!linkSource) {
-          setLinkSource({ trackId, blockId });
-          return;
-        }
-        if (linkSource.blockId === blockId) {
-          setLinkSource(null); // clicking the source again cancels
-          return;
-        }
-        // Decide which block is the dep and which is the dependent by
-        // slot, so the arrow is always drawn left→right regardless of
-        // which end the user clicked first. Same-slot clicks are
-        // rejected because the direction would be ambiguous.
-        const a = findBlockById(scenario, linkSource.blockId);
-        const b = findBlockById(scenario, blockId);
-        if (a && b) {
-          if (a.block.slot < b.block.slot) {
-            store.addDep(trackId, blockId, linkSource.blockId);
-          } else if (a.block.slot > b.block.slot) {
-            store.addDep(
-              linkSource.trackId,
-              linkSource.blockId,
-              blockId,
-            );
-          }
-          // slot === slot: ignore, ambiguous direction.
-        }
-        setLinkSource(null);
-        setSelected({ trackId, blockId });
-        return;
-      }
       setSelected({ trackId, blockId });
     },
-    [mode, linkSource, store, scenario],
+    [],
   );
 
   // ─── JSON import / export ──────────────────────────────────────────
@@ -516,9 +362,6 @@ export default function App() {
       ...src,
       id: uid('b'),
       slot: targetSlot,
-      // Drop deps — pasted blocks may land in a different container where
-      // the original deps don't make sense; user can re-link explicitly.
-      deps: [],
     };
     store.addBlock(targetId, newBlock);
     setSelected({ trackId: targetId, blockId: newBlock.id });
@@ -661,13 +504,6 @@ export default function App() {
             ▶ キャンバスをクリックしてブロック配置
           </div>
         )}
-        {mode === 'link' && (
-          <div className="text-[9px] text-[#60a5fa]">
-            {linkSource
-              ? '⟶ 2つ目のブロックをクリックで依存元 → 依存先のリンクを作成'
-              : '⟶ 依存元のブロックを選択してください'}
-          </div>
-        )}
         {mode === 'sync' && (
           <div className="text-[9px] text-[#f43f5e]">
             ⬡ キャンバスをクリックして同期ポイント配置
@@ -690,21 +526,19 @@ export default function App() {
           onRename={store.renameSubroutine}
           onDelete={(id) => {
             // If we're currently editing this subroutine, close the editor
-            // before deleting so selection/linkSource don't dangle.
+            // before deleting so selection doesn't dangle.
             if (
               editorMode.type === 'subroutine' &&
               editorMode.id === id
             ) {
               setEditorMode({ type: 'scenario' });
               setSelected(null);
-              setLinkSource(null);
             }
             store.deleteSubroutine(id);
           }}
           onOpen={(id) => {
             setEditorMode({ type: 'subroutine', id });
             setSelected(null);
-            setLinkSource(null);
           }}
         />
         <div className="relative min-h-0 flex-1">
@@ -716,8 +550,7 @@ export default function App() {
                 onClick={() => {
                   setEditorMode({ type: 'scenario' });
                   setSelected(null);
-                  setLinkSource(null);
-                }}
+                    }}
                 className="font-mono text-[10px] text-fl-text-dim transition-colors hover:text-fl-text"
               >
                 シナリオ
@@ -731,8 +564,7 @@ export default function App() {
                 onClick={() => {
                   setEditorMode({ type: 'scenario' });
                   setSelected(null);
-                  setLinkSource(null);
-                }}
+                    }}
                 className="ml-auto flex items-center gap-1 rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-0.5 font-mono text-[9px] text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text"
                 title="シナリオビューに戻る"
               >
@@ -762,10 +594,8 @@ export default function App() {
                     track={track}
                     totalSlots={totalSlots}
                     blockStatus={blockStatus}
-                    slotBounds={blockSlotBounds}
                     currentSlot={currentSlotByTrack[track.id]}
                     selectedBlockId={selected?.blockId ?? null}
-                    linkSourceBlockId={linkSource?.blockId ?? null}
                     blocksDraggable={mode === 'block'}
                     subroutines={scenario.subroutines}
                     onRename={store.renameTrack}
@@ -819,10 +649,8 @@ export default function App() {
                   track={scenario.errorHandler}
                   totalSlots={totalSlots}
                   blockStatus={blockStatus}
-                  slotBounds={blockSlotBounds}
                   currentSlot={currentSlotByTrack[ERROR_HANDLER_ID]}
                   selectedBlockId={selected?.blockId ?? null}
-                  linkSourceBlockId={linkSource?.blockId ?? null}
                   blocksDraggable={mode === 'block'}
                   variant="error"
                   subroutines={scenario.subroutines}
@@ -838,7 +666,7 @@ export default function App() {
                   onMoveContainerTree={store.moveBlockTree}
                 />
 
-                {/* DAG edges + sync overlay + global playhead */}
+                {/* Sync overlay + global playhead */}
                 <div
                   className="pointer-events-none absolute"
                   style={{
@@ -849,15 +677,6 @@ export default function App() {
                     zIndex: 9,
                   }}
                 >
-                  <GraphEdges
-                    tracks={scenario.tracks}
-                    totalSlots={totalSlots}
-                    selectedBlockId={
-                      selected && selected.trackId !== ERROR_HANDLER_ID
-                        ? selected.blockId
-                        : null
-                    }
-                  />
                   {scenario.syncPoints.map((sp) => (
                     <div key={sp.id} className="pointer-events-auto">
                       <SyncLine
@@ -876,10 +695,9 @@ export default function App() {
                     track={subroutineTrack}
                     totalSlots={totalSlots}
                     blockStatus={blockStatus}
-                    slotBounds={blockSlotBounds}
+
                     currentSlot={currentSlotByTrack[subroutineTrack.id]}
                     selectedBlockId={selected?.blockId ?? null}
-                    linkSourceBlockId={linkSource?.blockId ?? null}
                     blocksDraggable={mode === 'block'}
                     subroutines={scenario.subroutines}
                     onRename={(id, name) => store.renameSubroutine(id, name)}
@@ -895,28 +713,6 @@ export default function App() {
                     onCanvasClick={handleCanvasClick}
                     onMoveContainerTree={store.moveBlockTree}
                   />
-
-                  {/* DAG edges for the subroutine's single track */}
-                  <div
-                    className="pointer-events-none absolute"
-                    style={{
-                      top: RULER_H,
-                      left: HEADER_W,
-                      width: totalSlots * SLOT_PX,
-                      height: TRACK_H,
-                      zIndex: 9,
-                    }}
-                  >
-                    <GraphEdges
-                      tracks={[subroutineTrack]}
-                      totalSlots={totalSlots}
-                      selectedBlockId={
-                        selected && selected.trackId === subroutineTrack.id
-                          ? selected.blockId
-                          : null
-                      }
-                    />
-                  </div>
                 </>
               )
             )}
@@ -936,15 +732,12 @@ export default function App() {
           block={selectedBlock}
           trackId={selected?.trackId ?? null}
           isErrorHandler={isErrorHandlerSelection}
-          linkMode={mode === 'link'}
-          resolveDepLabel={resolveDepLabel}
           nodeManifest={nodeManifest}
           scenarioVariables={scenario.variables.scenario}
           parentContainerCases={parentContainerInfo.cases}
           parentContainerType={parentContainerInfo.type}
           onCreateVariable={store.setVariable}
           onChange={store.updateBlock}
-          onRemoveDep={store.removeDep}
           onClose={() => setSelected(null)}
         />
       </div>
@@ -981,7 +774,6 @@ export default function App() {
           open={!!syncModal}
           onOpenChange={(o) => !o && setSyncModal(null)}
           slot={syncModal.slot}
-          tracks={scenario.tracks}
           onAdd={store.addSync}
         />
       )}

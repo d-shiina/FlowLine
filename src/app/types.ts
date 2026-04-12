@@ -2,9 +2,10 @@
  * FLOWLINE scenario model.
  *
  * The horizontal axis is block-based: each block occupies exactly one slot
- * (1 slot = 1 logical step). Execution order is defined by `deps` (DAG
- * edges), not by position. A block's `slot` is purely for visual layout,
- * and the renderer guarantees no two blocks on the same track share a slot.
+ * (1 slot = 1 logical step). Execution order is defined by slot position
+ * within each track. A block's `slot` is used for both visual layout and
+ * ordering, and the renderer guarantees no two blocks on the same track
+ * share a slot.
  *
  * Error handling follows a 3-layer model — see docs/02-error-handling.md.
  */
@@ -62,8 +63,6 @@ export interface Block {
   nodeId?: string;
   /** Visual slot on the track (0-indexed). Unique per track. */
   slot: number;
-  /** Ids of blocks this one depends on (DAG edges). */
-  deps: string[];
   /** Free-form node parameters. Overrides node decorator defaults. */
   params?: Record<string, unknown>;
   /**
@@ -126,10 +125,6 @@ export interface SyncPoint {
   label: string;
   /** Visual slot where the sync line is drawn. */
   slot: number;
-  /** Ids of blocks that must all complete before sync passes. */
-  deps: string[];
-  /** Track ids this sync spans (for visualization). Empty = all tracks. */
-  trackIds: string[];
 }
 
 export interface Subroutine {

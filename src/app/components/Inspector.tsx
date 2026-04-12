@@ -14,15 +14,12 @@ interface Props {
   block: Block | null;
   trackId: string | null;
   isErrorHandler: boolean;
-  linkMode: boolean;
-  resolveDepLabel: (depId: string) => string;
   nodeManifest: NodeManifestEntry[];
   scenarioVariables: Record<string, unknown>;
   parentContainerCases: string[] | null;
   parentContainerType: 'loop' | 'branch' | 'switch' | null;
   onCreateVariable: (key: string, value: unknown) => void;
   onChange: (trackId: string, blockId: string, patch: Partial<Block>) => void;
-  onRemoveDep: (trackId: string, blockId: string, depId: string) => void;
   onClose: () => void;
 }
 
@@ -57,15 +54,12 @@ export function Inspector({
   block,
   trackId,
   isErrorHandler,
-  linkMode,
-  resolveDepLabel,
   nodeManifest,
   scenarioVariables,
   parentContainerCases,
   parentContainerType,
   onCreateVariable,
   onChange,
-  onRemoveDep,
   onClose,
 }: Props) {
   if (!block || !trackId) {
@@ -393,39 +387,6 @@ export function Inspector({
             </div>
           </div>
         )}
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <span className="font-mono text-[9px] text-fl-text-faint">DEPS (DAG)</span>
-        {block.deps.length === 0 ? (
-          <div className="rounded-md border border-fl-border-2 bg-fl-bg px-2 py-1 font-mono text-[10px] text-fl-text-ghost">
-            (none)
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-1">
-            {block.deps.map((d) => (
-              <span
-                key={d}
-                className="inline-flex items-center gap-1 rounded border border-fl-border-2 bg-fl-bg px-1.5 py-0.5 font-mono text-[9px] text-fl-text-muted"
-              >
-                {resolveDepLabel(d)}
-                <button
-                  type="button"
-                  onClick={() => onRemoveDep(trackId, block.id, d)}
-                  className="text-fl-text-faint hover:text-red-500"
-                  title="依存を削除"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-        <span className="font-mono text-[8px] leading-relaxed text-fl-text-ghost">
-          {linkMode
-            ? '依存リンクモード: 他のブロックをクリックして追加'
-            : 'ツールバーの「依存リンク」モードで追加'}
-        </span>
       </div>
 
       <div className="mt-auto font-mono text-[9px] text-fl-text-ghost">

@@ -7,19 +7,17 @@ import { summarizeExpression } from './engine/jsonLogic';
  * Shared layout math for the FLOWLINE timeline — the single source
  * of truth for every pixel-level decision the canvas makes.
  *
- * Without this, four places ended up recomputing the same geometry
+ * Without this, multiple places ended up recomputing the same geometry
  * and drifting: TrackRow for frame / lane rendering, BlockView for
- * per-block Y offset, GraphEdges for arrow routing, and App for the
- * overlay container height. All of them now call into one of the
- * two entry points here:
+ * per-block Y offset, and App for the overlay container height. All
+ * of them now call into one of the two entry points here:
  *
  * - ``computeTrackLayout(track)``  — single track, used by TrackRow
  *   and BlockView. Returns container frames, per-block lane info,
  *   per-block boxes, and the dynamic track height.
- * - ``computeTracksLayout(tracks)`` — whole canvas, used by
- *   GraphEdges to route arrows across tracks and by App to size the
- *   overlay that hosts them. Stitches per-track layouts together
- *   with running Y offsets.
+ * - ``computeTracksLayout(tracks)`` — whole canvas, used by App to
+ *   size the overlay that hosts sync lines. Stitches per-track
+ *   layouts together with running Y offsets.
  *
  * Layout invariants (must stay coherent with BlockView rendering):
  *
@@ -44,7 +42,7 @@ import { summarizeExpression } from './engine/jsonLogic';
 export const FRAME_HEADER_H = 16;
 const FRAME_INSET = 3;
 
-/** Box used by GraphEdges to attach arrow endpoints. */
+/** Box used by arrow routing to attach endpoints. */
 export interface BlockLayoutBox {
   leftX: number;
   rightX: number;
@@ -85,7 +83,7 @@ export interface TrackLayout {
   /**
    * Per-block boxes in *track-local* coordinates (y = 0 at the top
    * of the track row). ``computeTracksLayout`` shifts these into
-   * canvas coordinates for GraphEdges.
+   * canvas coordinates.
    */
   blocks: Map<string, BlockLayoutBox>;
 }
@@ -269,8 +267,8 @@ export function computeTrackLayout(track: Track): TrackLayout {
 
 /**
  * Lay out every regular track and stitch their per-track Y
- * coordinates into a single canvas-coordinate space so GraphEdges
- * can route arrows between blocks on different tracks.
+ * coordinates into a single canvas-coordinate space for sync line
+ * rendering and overlay sizing.
  */
 export function computeTracksLayout(tracks: Track[]): TracksLayout {
   const perTrack: TrackLayout[] = [];

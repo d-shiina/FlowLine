@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PortBinding } from '../../types';
 import type { NodeManifestEntry, NodePortDef } from '../../../globals';
 import { formatLiteral, parseLiteral } from '../../valueLiteral';

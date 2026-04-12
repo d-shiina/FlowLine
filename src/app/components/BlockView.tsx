@@ -10,15 +10,7 @@ interface Props {
   trackId: string;
   status: BlockStatus;
   selected: boolean;
-  linkSource: boolean;
   draggable: boolean;
-  /**
-   * Legal slot range preserving L→R dep order. `min` is one past the
-   * rightmost block this block depends on; `max` is one before the
-   * leftmost block that depends on this one. `max` may be `Infinity`
-   * for blocks with no dependents. Undefined means "no constraint".
-   */
-  slotBounds?: { min: number; max: number };
   /**
    * Container frames that currently exist on the same track. Used by
    * the drag handler to auto-reparent a block when it's dropped over
@@ -112,9 +104,7 @@ export function BlockView({
   trackId,
   status,
   selected,
-  linkSource,
   draggable,
-  slotBounds,
   containerFrames,
   lane,
   trackHeight,
@@ -196,17 +186,10 @@ export function BlockView({
       setDragging(true);
     };
 
-    // Clamp the drop target to the block's legal slot range so a
-    // drag can never invert a dep arrow. `min` comes from deps
-    // (dep.slot + 1); `max` comes from dependents (dependent.slot - 1).
-    // Absence = no constraint.
-    const minSlot = slotBounds?.min ?? 0;
-    const maxSlot = slotBounds?.max ?? Number.POSITIVE_INFINITY;
-
     const updateTarget = (ev: MouseEvent) => {
       const rect = trackCanvas.getBoundingClientRect();
       const raw = Math.max(0, pxToSlot(ev.clientX - rect.left));
-      targetSlot = Math.min(Math.max(raw, minSlot), maxSlot);
+      targetSlot = raw;
 
       // Find the container frame the cursor is over (ignoring this
       // block's own frame so a loop can't be dropped into itself).
@@ -359,19 +342,17 @@ export function BlockView({
   // Execution state trumps selection/hover when it comes to coloring the
   // frame, since it's the most important signal while the scenario is
   // running.
-  const borderColor = linkSource
-    ? '#60a5fa'
-    : isError
-      ? '#ef4444'
-      : isRunning
+  const borderColor = isError
+    ? '#ef4444'
+    : isRunning
+      ? meta.color
+      : selected
         ? meta.color
-        : selected
-          ? meta.color
-          : isOk
-            ? `${meta.color}44`
-            : isFaded
-              ? '#94a3b855'
-              : `${meta.color}${hov ? 'cc' : '66'}`;
+        : isOk
+          ? `${meta.color}44`
+          : isFaded
+            ? '#94a3b855'
+            : `${meta.color}${hov ? 'cc' : '66'}`;
 
   const background = isError
     ? '#ef44441f'
@@ -385,23 +366,19 @@ export function BlockView({
             ? `${meta.color}28`
             : `${meta.color}18`;
 
-  const shadow = linkSource
-    ? '0 0 12px #60a5fa88'
-    : isError
-      ? '0 0 18px #ef444488'
-      : isRunning
-        ? `0 0 18px ${meta.color}aa`
-        : selected
-          ? `0 0 0 1px ${meta.color}88`
-          : 'none';
-
-  const zIndex = linkSource
-    ? 6
-    : isRunning || isError
-      ? 5
+  const shadow = isError
+    ? '0 0 18px #ef444488'
+    : isRunning
+      ? `0 0 18px ${meta.color}aa`
       : selected
-        ? 4
-        : 2;
+        ? `0 0 0 1px ${meta.color}88`
+        : 'none';
+
+  const zIndex = isRunning || isError
+    ? 5
+    : selected
+      ? 4
+      : 2;
 
   return (
     <>
@@ -415,7 +392,7 @@ export function BlockView({
           cursor: draggable ? (dragging ? 'grabbing' : 'grab') : 'crosshair',
           opacity: dragging ? 0.35 : isFaded ? 0.5 : 1,
           background,
-          border: `${linkSource ? 2 : isError || isRunning ? 2 : 1.5}px ${
+          border: `${isError || isRunning ? 2 : 1.5}px ${
             isSkipped || isCancelled ? 'dashed' : 'solid'
           } ${borderColor}`,
           boxShadow: shadow,

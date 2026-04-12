@@ -180,49 +180,25 @@ export class Executor {
         .filter(
           (sp) =>
             sp.slot <= block.slot &&
-            !crossedSyncSlots.has(sp.slot) &&
-            (sp.trackIds.length === 0 || sp.trackIds.includes(track.id)),
+            !crossedSyncSlots.has(sp.slot),
         )
         .sort((a, b) => a.slot - b.slot);
       for (const sp of syncsToCross) {
         if (this.aborted) break;
         this.log('info', track.id, undefined, `同期ポイント #${sp.slot} 待機`);
-        await this.waitForBlocks(sp.deps);
+        // Wait for ALL blocks across ALL tracks whose slot < sp.slot.
+        const priorBlockIds: string[] = [];
+        for (const t of this.scenario.tracks) {
+          for (const b of t.blocks) {
+            if (b.slot < sp.slot) priorBlockIds.push(b.id);
+          }
+        }
+        await this.waitForBlocks(priorBlockIds);
         crossedSyncSlots.add(sp.slot);
       }
 
       if (this.aborted) {
         this.markCancelled(block.id);
-        continue;
-      }
-
-      // Wait for this block's DAG deps.
-      if (block.deps.length > 0) {
-        await this.waitForBlocks(block.deps);
-      }
-      if (this.aborted) {
-        this.markCancelled(block.id);
-        continue;
-      }
-
-      // If any dep ended in `error`, skip this block transitively.
-      const depFailed = block.deps.some(
-        (id) => this.state.status[id] === 'error',
-      );
-      if (depFailed) {
-        this.state.status[block.id] = 'skipped';
-        // Children inherit the skip so the UI doesn't pretend they
-        // ran on their own.
-        for (const child of this.childrenOf(track.blocks, block.id)) {
-          this.state.status[child.id] = 'skipped';
-        }
-        this.log(
-          'warn',
-          track.id,
-          block.id,
-          '依存ブロックが失敗したためスキップ',
-        );
-        this.flush();
         continue;
       }
 

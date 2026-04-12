@@ -32,10 +32,10 @@ const basic: Scenario = {
       name: 'メインフロー',
       color: '#3B82F6',
       blocks: [
-        { id: 'b-1', type: 'action', label: 'アプリ起動', slot: 0, deps: [] },
-        { id: 'b-2', type: 'action', label: 'データ入力', slot: 1, deps: ['b-1'] },
-        { id: 'b-3', type: 'action', label: '送信', slot: 2, deps: ['b-2'] },
-        { id: 'b-4', type: 'action', label: '完了通知', slot: 3, deps: ['b-3'] },
+        { id: 'b-1', type: 'action', label: 'アプリ起動', slot: 0 },
+        { id: 'b-2', type: 'action', label: 'データ入力', slot: 1 },
+        { id: 'b-3', type: 'action', label: '送信', slot: 2 },
+        { id: 'b-4', type: 'action', label: '完了通知', slot: 3 },
       ],
     },
   ],
@@ -63,10 +63,10 @@ const parallel: Scenario = {
       name: 'Excel処理',
       color: '#3B82F6',
       blocks: [
-        { id: 'b-10', type: 'action', label: 'Excel起動', slot: 0, deps: [] },
-        { id: 'b-11', type: 'action', label: 'データ読込', slot: 1, deps: ['b-10'] },
-        { id: 'b-12', type: 'loop', label: '行ループ', slot: 2, deps: ['b-11'] },
-        { id: 'b-13', type: 'action', label: 'ファイル保存', slot: 3, deps: ['b-12'] },
+        { id: 'b-10', type: 'action', label: 'Excel起動', slot: 0 },
+        { id: 'b-11', type: 'action', label: 'データ読込', slot: 1 },
+        { id: 'b-12', type: 'loop', label: '行ループ', slot: 2 },
+        { id: 'b-13', type: 'action', label: 'ファイル保存', slot: 3 },
       ],
     },
     {
@@ -74,17 +74,16 @@ const parallel: Scenario = {
       name: 'メール処理',
       color: '#22C55E',
       blocks: [
-        { id: 'b-20', type: 'action', label: '下書き作成', slot: 0, deps: [] },
-        { id: 'b-21', type: 'action', label: '添付追加', slot: 1, deps: ['b-20'] },
+        { id: 'b-20', type: 'action', label: '下書き作成', slot: 0 },
+        { id: 'b-21', type: 'action', label: '添付追加', slot: 1 },
         {
           id: 'b-22',
           type: 'action',
           label: 'ダイアログ閉じる',
           slot: 2,
-          deps: ['b-21'],
           skipIfMissing: true,
         },
-        { id: 'b-23', type: 'action', label: 'メール送信', slot: 5, deps: ['b-22'] },
+        { id: 'b-23', type: 'action', label: 'メール送信', slot: 5 },
       ],
     },
     {
@@ -92,13 +91,12 @@ const parallel: Scenario = {
       name: 'ログ記録',
       color: '#F59E0B',
       blocks: [
-        { id: 'b-30', type: 'action', label: 'ログ開始', slot: 0, deps: [] },
+        { id: 'b-30', type: 'action', label: 'ログ開始', slot: 0 },
         {
           id: 'b-31',
           type: 'action',
           label: '結果書込',
           slot: 5,
-          deps: ['b-30'],
           onError: { retry: 3, then: 'skip' },
           timeout: 60,
         },
@@ -110,8 +108,6 @@ const parallel: Scenario = {
       id: 'sync-1',
       label: '合流',
       slot: 4,
-      deps: ['b-13', 'b-22', 'b-30'],
-      trackIds: [],
     },
   ],
   errorHandler: emptyErrorHandler(),
@@ -145,7 +141,6 @@ const controlFlow: Scenario = {
           type: 'action',
           label: '初期化',
           slot: 0,
-          deps: [],
         },
         // Fixed-count loop: runs body 3 times. Container and body
         // share column 1 — the header bar sits at the top of that
@@ -155,7 +150,6 @@ const controlFlow: Scenario = {
           type: 'loop',
           label: '3 回くり返し',
           slot: 1,
-          deps: ['b-setup'],
           params: { iterations: 3 },
         },
         {
@@ -163,7 +157,6 @@ const controlFlow: Scenario = {
           type: 'action',
           label: 'ワーク',
           slot: 1,
-          deps: [],
           parentBlockId: 'b-loop1',
         },
         // Branch: TRUE and FALSE children share column 2 so the
@@ -174,7 +167,6 @@ const controlFlow: Scenario = {
           type: 'branch',
           label: 'retries < max?',
           slot: 2,
-          deps: ['b-loop1'],
           params: {
             condition: {
               '<': [
@@ -189,7 +181,6 @@ const controlFlow: Scenario = {
           type: 'action',
           label: 'リトライ処理',
           slot: 2,
-          deps: [],
           parentBlockId: 'b-branch',
           parentBranch: 'then',
         },
@@ -198,7 +189,6 @@ const controlFlow: Scenario = {
           type: 'action',
           label: '諦めて通知',
           slot: 2,
-          deps: [],
           parentBlockId: 'b-branch',
           parentBranch: 'else',
         },
@@ -209,7 +199,6 @@ const controlFlow: Scenario = {
           type: 'loop',
           label: 'ポーリング',
           slot: 3,
-          deps: ['b-branch'],
           params: {
             whileCondition: {
               '<': [{ var: 'track.track-1.loop_index' }, 2],
@@ -221,7 +210,6 @@ const controlFlow: Scenario = {
           type: 'action',
           label: 'ステータス確認',
           slot: 3,
-          deps: [],
           parentBlockId: 'b-loop2',
         },
         {
@@ -229,7 +217,6 @@ const controlFlow: Scenario = {
           type: 'action',
           label: '完了通知',
           slot: 4,
-          deps: ['b-loop2'],
         },
       ],
     },
@@ -262,14 +249,12 @@ const switchDemo: Scenario = {
           type: 'action',
           label: 'ステータス取得',
           slot: 0,
-          deps: [],
         },
         {
           id: 'b-switch',
           type: 'switch',
           label: 'status の分岐',
           slot: 1,
-          deps: ['b-prep'],
           params: {
             expression: { var: 'scenario.status' },
             cases: ['ok', 'warn', 'error', 'default'],
@@ -283,7 +268,6 @@ const switchDemo: Scenario = {
           type: 'action',
           label: '正常処理',
           slot: 1,
-          deps: [],
           parentBlockId: 'b-switch',
           parentBranch: 'ok',
         },
@@ -292,7 +276,6 @@ const switchDemo: Scenario = {
           type: 'action',
           label: '警告ログ',
           slot: 1,
-          deps: [],
           parentBlockId: 'b-switch',
           parentBranch: 'warn',
         },
@@ -301,7 +284,6 @@ const switchDemo: Scenario = {
           type: 'action',
           label: 'エラー通知',
           slot: 1,
-          deps: [],
           parentBlockId: 'b-switch',
           parentBranch: 'error',
         },
@@ -310,7 +292,6 @@ const switchDemo: Scenario = {
           type: 'action',
           label: '不明ステータス',
           slot: 1,
-          deps: [],
           parentBlockId: 'b-switch',
           parentBranch: 'default',
         },
@@ -319,7 +300,6 @@ const switchDemo: Scenario = {
           type: 'action',
           label: '完了通知',
           slot: 2,
-          deps: ['b-switch'],
         },
       ],
     },

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import type { Theme } from '../useTheme';
 
-export type EditMode = 'block' | 'sync' | 'link';
+export type EditMode = 'block' | 'sync';
 
 interface Props {
   playing: boolean;

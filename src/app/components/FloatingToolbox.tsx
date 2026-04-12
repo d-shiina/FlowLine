@@ -1,4 +1,4 @@
-import { Box, Hexagon, Link2, Redo2, Undo2 } from 'lucide-react';
+import { Box, Hexagon, Redo2, Undo2 } from 'lucide-react';
 import type { EditMode } from './Toolbar';
 
 interface Props {
@@ -42,13 +42,6 @@ export function FloatingToolbox({
       hint: 'キャンバスをクリックしてブロック配置',
       color: '#3b82f6',
       icon: Box,
-    },
-    {
-      key: 'link',
-      label: '依存リンク',
-      hint: '2つのブロックをクリックして依存関係を作成',
-      color: '#60a5fa',
-      icon: Link2,
     },
     {
       key: 'sync',

@@ -42,36 +42,11 @@ function makeRoomAt(
   );
 }
 
-/** Remove all references to `blockId` from deps across the scenario. */
-function cascadeDeleteDep(s: Scenario, blockId: string): Scenario {
-  const filterDeps = (deps: string[]) => deps.filter((d) => d !== blockId);
-  const filterBlock = (b: Block) => ({ ...b, deps: filterDeps(b.deps) });
-  return {
-    ...s,
-    tracks: s.tracks.map((t) => ({
-      ...t,
-      blocks: t.blocks.map(filterBlock),
-    })),
-    errorHandler: {
-      ...s.errorHandler,
-      blocks: s.errorHandler.blocks.map(filterBlock),
-    },
-    subroutines: s.subroutines.map((sub) => ({
-      ...sub,
-      blocks: sub.blocks.map(filterBlock),
-    })),
-    syncPoints: s.syncPoints.map((sp) => ({
-      ...sp,
-      deps: filterDeps(sp.deps),
-    })),
-  };
-}
-
 /**
  * Apply a block-level mutation to whichever container holds the blocks:
  * a regular track, the error handler, OR a subroutine. This lets block
- * operations (add/update/delete/addDep/removeDep) work uniformly across
- * all edit surfaces including the subroutine internal editor.
+ * operations (add/update/delete) work uniformly across all edit surfaces
+ * including the subroutine internal editor.
  *
  * Returns the same scenario reference if `fn` returned the same blocks
  * array (no-op short-circuit feeds commit()'s no-op detection).
@@ -155,9 +130,6 @@ export interface ScenarioStore {
     rootBlockId: string,
     delta: number,
   ) => void;
-
-  addDep: (trackId: string, blockId: string, depId: string) => void;
-  removeDep: (trackId: string, blockId: string, depId: string) => void;
 
   addSync: (sp: SyncPoint) => void;
   deleteSync: (id: string) => void;
@@ -431,39 +403,8 @@ export function useScenario(): ScenarioStore {
         const removed = mapContainerBlocks(orphaned, containerId, (blocks) =>
           blocks.filter((b) => b.id !== blockId),
         );
-        return cascadeDeleteDep(removed, blockId);
+        return removed;
       });
-    },
-    [commit],
-  );
-
-  const addDep = useCallback(
-    (containerId: string, blockId: string, depId: string) => {
-      if (blockId === depId) return; // no self-deps
-      commit((s) =>
-        mapContainerBlocks(s, containerId, (blocks) =>
-          blocks.map((b) => {
-            if (b.id !== blockId) return b;
-            if (b.deps.includes(depId)) return b;
-            return { ...b, deps: [...b.deps, depId] };
-          }),
-        ),
-      );
-    },
-    [commit],
-  );
-
-  const removeDep = useCallback(
-    (containerId: string, blockId: string, depId: string) => {
-      commit((s) =>
-        mapContainerBlocks(s, containerId, (blocks) =>
-          blocks.map((b) =>
-            b.id === blockId
-              ? { ...b, deps: b.deps.filter((d) => d !== depId) }
-              : b,
-          ),
-        ),
-      );
     },
     [commit],
   );
@@ -552,8 +493,6 @@ export function useScenario(): ScenarioStore {
     updateBlock,
     deleteBlock,
     moveBlockTree,
-    addDep,
-    removeDep,
     addSync,
     deleteSync,
     addSubroutine,

@@ -13,15 +13,8 @@ interface Props {
   track: Track;
   totalSlots: number;
   blockStatus: Record<string, BlockStatus>;
-  /**
-   * Per-block slot range that preserves dep ordering (arrows stay
-   * left-to-right). Computed globally in App.tsx and passed through
-   * so BlockView can clamp the drag target.
-   */
-  slotBounds: Record<string, { min: number; max: number }>;
   currentSlot: number | undefined;
   selectedBlockId: string | null;
-  linkSourceBlockId: string | null;
   blocksDraggable: boolean;
   variant?: Variant;
   subroutines: Subroutine[];
@@ -56,10 +49,8 @@ export function TrackRow({
   track,
   totalSlots,
   blockStatus,
-  slotBounds,
   currentSlot,
   selectedBlockId,
-  linkSourceBlockId,
   blocksDraggable,
   variant = 'normal',
   subroutines,
@@ -81,9 +72,9 @@ export function TrackRow({
   };
 
   // Layout computation is fully delegated to `computeTrackLayout`
-  // so TrackRow / BlockView / GraphEdges / App all agree on the
-  // same pixel-level decisions. Frames, lane assignments, and the
-  // dynamic track height come out of a single memoised call.
+  // so TrackRow / BlockView / App all agree on the same pixel-level
+  // decisions. Frames, lane assignments, and the dynamic track
+  // height come out of a single memoised call.
   const layout = useMemo(() => computeTrackLayout(track), [track]);
   const { containerFrames, blockLanes, trackHeight } = layout;
 
@@ -429,9 +420,7 @@ export function TrackRow({
               trackId={track.id}
               status={blockStatus[b.id] ?? 'idle'}
               selected={selectedBlockId === b.id}
-              linkSource={linkSourceBlockId === b.id}
               draggable={blocksDraggable}
-              slotBounds={slotBounds[b.id]}
               containerFrames={containerFrames}
               lane={blockLanes.get(b.id)}
               trackHeight={trackHeight}

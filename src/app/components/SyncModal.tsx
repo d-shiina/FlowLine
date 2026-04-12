@@ -1,49 +1,27 @@
 import { useState } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
-import type { SyncPoint, Track } from '../types';
+import type { SyncPoint } from '../types';
 import { uid } from '../useScenario';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   slot: number;
-  tracks: Track[];
   onAdd: (sp: SyncPoint) => void;
 }
 
 /**
- * Add a sync point at a given slot. The user picks which tracks it covers;
- * deps are inferred from the latest block on each selected track whose
- * slot+span <= current slot (a simple heuristic; user can refine later).
+ * Add a sync point at a given slot. The user sets a label and slot;
+ * at runtime the engine waits for all blocks with slot < sp.slot.
  */
-export function SyncModal({ open, onOpenChange, slot, tracks, onAdd }: Props) {
+export function SyncModal({ open, onOpenChange, slot, onAdd }: Props) {
   const [label, setLabel] = useState('合流');
-  const [selected, setSelected] = useState<string[]>(() => tracks.map((t) => t.id));
-
-  const toggle = (id: string) =>
-    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const handleAdd = () => {
-    // infer deps: for each selected track, find the rightmost block whose
-    // slot is strictly before the sync slot.
-    const deps: string[] = [];
-    for (const tid of selected) {
-      const track = tracks.find((t) => t.id === tid);
-      if (!track) continue;
-      let best: { id: string; slot: number } | null = null;
-      for (const b of track.blocks) {
-        if (b.slot < slot && (!best || b.slot > best.slot)) {
-          best = { id: b.id, slot: b.slot };
-        }
-      }
-      if (best) deps.push(best.id);
-    }
     onAdd({
       id: uid('sync'),
       slot,
       label: label || '合流',
-      deps,
-      trackIds: selected,
     });
     onOpenChange(false);
   };
@@ -60,45 +38,13 @@ export function SyncModal({ open, onOpenChange, slot, tracks, onAdd }: Props) {
             位置: <span className="text-fl-text-muted">#{slot}</span>
           </Dialog.Description>
 
-          <div className="mb-3">
+          <div className="mb-5">
             <div className="mb-1.5 font-mono text-[10px] text-fl-text-faint">ラベル</div>
             <input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               className="w-full rounded-lg border border-fl-border-strong bg-fl-panel-2 px-2.5 py-1.5 font-mono text-[11px] text-fl-text outline-none"
             />
-          </div>
-
-          <div className="mb-5">
-            <div className="mb-2 font-mono text-[10px] text-fl-text-faint">対象トラック</div>
-            {tracks.map((t) => {
-              const on = selected.includes(t.id);
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => toggle(t.id)}
-                  className="mb-1 flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors"
-                  style={{
-                    background: on ? `${t.color}18` : 'transparent',
-                    borderColor: on ? `${t.color}60` : 'var(--fl-border-2)',
-                  }}
-                >
-                  <span
-                    className="inline-block h-2 w-2 rounded-full"
-                    style={{ background: on ? t.color : 'var(--fl-border-strong)' }}
-                  />
-                  <span
-                    className="font-mono text-[11px]"
-                    style={{
-                      color: on ? t.color : 'var(--fl-text-faint)',
-                    }}
-                  >
-                    {t.name}
-                  </span>
-                </button>
-              );
-            })}
           </div>
 
           <div className="flex justify-end gap-2">
