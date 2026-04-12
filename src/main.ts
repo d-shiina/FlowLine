@@ -8,6 +8,7 @@ import {
   getLoadErrors,
   getManifest,
   reloadWorker,
+  resetWorker,
   runNode,
   shutdownWorker,
   type RunNodeRequest,
@@ -197,6 +198,11 @@ ipcMain.handle(
     }
   },
 );
+
+ipcMain.handle('runtime:reset-worker', () => {
+  resetWorker();
+  return { ok: true };
+});
 
 ipcMain.handle('runtime:reload-nodes', async () => {
   try {

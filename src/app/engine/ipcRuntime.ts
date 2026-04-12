@@ -66,6 +66,8 @@ export class IpcRuntime implements Runtime {
     if (!ensure.ok) {
       throw new Error(ensure.error);
     }
+    // Reset worker state (close leftover browser sessions, etc.).
+    await api.resetWorker();
     const runtime = new IpcRuntime();
     for (const entry of ensure.manifest) {
       runtime.manifestByNodeId.set(entry.id, entry);

@@ -346,6 +346,19 @@ export function cancelNode(reqId: string): void {
   }
 }
 
+/**
+ * Send a reset signal to the worker, clearing per-run state
+ * (straggler executions, browser sessions, etc.).
+ */
+export function resetWorker(): void {
+  if (!child) return;
+  try {
+    writeToWorker({ type: 'reset' });
+  } catch {
+    /* worker gone */
+  }
+}
+
 /** Return the cached node manifest. Empty array if worker not up yet. */
 export function getManifest(): NodeManifestEntry[] {
   return manifest;

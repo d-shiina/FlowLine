@@ -129,6 +129,7 @@ export interface FlowlineRuntimeAPI {
   ): Promise<{ ok: boolean; output: string; error?: string }>;
   pipList(): Promise<{ ok: boolean; packages: string[]; error?: string }>;
   onPipProgress(cb: (event: { message: string }) => void): () => void;
+  resetWorker(): Promise<{ ok: boolean }>;
   reloadNodes(): Promise<
     | { ok: true; manifest: NodeManifestEntry[]; loadErrors: NodeLoadError[] }
     | { ok: false; error: string }

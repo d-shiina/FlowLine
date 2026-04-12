@@ -121,6 +121,8 @@ contextBridge.exposeInMainWorld('flowlineRuntime', {
     ipcRenderer.on('runtime:pip-progress', handler);
     return () => ipcRenderer.off('runtime:pip-progress', handler);
   },
+  /** Reset worker state (close browser sessions, cancel stragglers). */
+  resetWorker: () => ipcRenderer.invoke('runtime:reset-worker'),
   /** Re-scan _runtime/nodes/ and rebuild the worker registry. */
   reloadNodes: () => ipcRenderer.invoke('runtime:reload-nodes'),
   /** Fetch the most recent load-error list reported by the worker. */

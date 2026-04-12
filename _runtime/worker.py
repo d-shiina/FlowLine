@@ -415,14 +415,19 @@ def handle_cancel(msg: Dict[str, Any]) -> None:
 def handle_reset() -> None:
     """Clear per-run state between scenario executions.
 
-    Phase 2a keeps this minimal: the worker holds no track-scope
-    variables yet (those live in the engine). We do signal-cancel
-    any straggler execution so a run that ended on abort doesn't
-    leak into the next one.
+    Cancels any straggler execution and closes all browser sessions
+    so the next run starts fresh.
     """
     with _current_lock:
         if _current is not None:
             _current.cancel_event.set()
+
+    # Close any leftover browser sessions from the previous run.
+    try:
+        from nodes.browser._session import run_on_browser, close_all_sessions
+        run_on_browser(close_all_sessions)
+    except Exception:
+        pass  # Browser module not loaded or no sessions — fine.
 
 
 def handle_reload() -> None:
