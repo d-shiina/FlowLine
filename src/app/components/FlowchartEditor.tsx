@@ -365,12 +365,20 @@ export function FlowchartEditor({
               {topLevelSteps.map((step, i) => (
                 <Fragment key={step.id}>
                   {i > 0 && <StepConnector />}
-                  {/* Drop insert indicator */}
-                  {dropInsertIndex === i && dragStepId !== step.id && (
-                    <div className="mx-1 h-24 w-[3px] flex-shrink-0 rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
-                  )}
                   {step.type === 'group' ? (
-                    <div className="flex-shrink-0" data-step-id={step.id} data-group-id={step.id}>
+                    <div
+                      className="flex-shrink-0 rounded-lg transition-all"
+                      data-step-id={step.id}
+                      data-group-id={step.id}
+                      style={{
+                        boxShadow:
+                          dropInsertIndex === i && dragStepId !== step.id
+                            ? 'inset 4px 0 0 0 #3b82f6'
+                            : dropInsertIndex === i + 1 && dragStepId !== step.id
+                              ? 'inset -4px 0 0 0 #3b82f6'
+                              : 'none',
+                      }}
+                    >
                       <FlowchartGroupView
                         step={step}
                         childSteps={block.steps.filter((s) => s.parentStepId === step.id).sort((a, b) => a.order - b.order)}
@@ -390,7 +398,18 @@ export function FlowchartEditor({
                       />
                     </div>
                   ) : (
-                    <div className="flex-shrink-0" data-step-id={step.id}>
+                    <div
+                      className="flex-shrink-0 rounded-lg transition-all"
+                      data-step-id={step.id}
+                      style={{
+                        boxShadow:
+                          dropInsertIndex === i && dragStepId !== step.id
+                            ? 'inset 4px 0 0 0 #3b82f6'
+                            : dropInsertIndex === i + 1 && dragStepId !== step.id
+                              ? 'inset -4px 0 0 0 #3b82f6'
+                              : 'none',
+                      }}
+                    >
                       <FlowchartStepView
                         step={step}
                         selected={selectedIds.includes(step.id)}
@@ -407,11 +426,6 @@ export function FlowchartEditor({
                   )}
                 </Fragment>
               ))}
-
-              {/* Drop at end indicator */}
-              {dropInsertIndex === topLevelSteps.length && (
-                <div className="mx-1 h-24 w-[3px] flex-shrink-0 rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
-              )}
 
               {/* Add button */}
               {topLevelSteps.length > 0 && <StepConnector />}
