@@ -10,8 +10,9 @@ from flowline import node
     label="ページ移動",
     labels={"ja": "ページ移動", "en": "Navigate"},
     category="browser",
-    version="0.1.0",
+    version="0.2.0",
     ports={
+        "browser": {"kind": "in", "type": "string", "required": True},
         "url": {"kind": "in", "type": "string", "required": True},
         "title": {"kind": "out", "type": "string"},
     },
@@ -27,12 +28,13 @@ from flowline import node
 def run(ports, params, ctx):
     from ._session import run_on_browser, get_page
 
+    browser_name = ports["browser"]
     url = ports["url"]
     wait = params.get("wait_until", "domcontentloaded")
-    ctx.log("info", f"移動: {url}")
+    ctx.log("info", f"[{browser_name}] 移動: {url}")
 
     def _do():
-        page = get_page()
+        page = get_page(browser_name)
         page.goto(url, wait_until=wait)
         return page.title()
 

@@ -10,30 +10,32 @@ from flowline import node
     label="ブラウザを開く",
     labels={"ja": "ブラウザを開く", "en": "Open Browser"},
     category="browser",
-    version="0.1.0",
+    version="0.2.0",
     ports={
         "url": {"kind": "in", "type": "string", "required": False},
+        "browser": {"kind": "out", "type": "string"},
         "title": {"kind": "out", "type": "string"},
     },
     params={
-        "url": {
-            "type": "string",
-            "default": "https://www.google.com",
-        },
+        "name": {"type": "string", "default": "default"},
+        "url": {"type": "string", "default": "https://www.google.com"},
+        "headless": {"type": "boolean", "default": False},
     },
     on_error="abort",
 )
 def run(ports, params, ctx):
-    from ._session import run_on_browser, get_page
+    from ._session import run_on_browser, open_session
 
+    name = params.get("name", "default")
     url = ports.get("url") or params.get("url", "https://www.google.com")
-    ctx.log("info", f"ブラウザを開いています: {url}")
+    headless = params.get("headless", False)
+    ctx.log("info", f"ブラウザ「{name}」を開いています: {url}")
 
     def _do():
-        page = get_page()
+        page = open_session(name, headless=headless)
         page.goto(url, wait_until="domcontentloaded")
         return page.title()
 
     title = run_on_browser(_do)
-    ctx.log("info", f"ページタイトル: {title}")
-    return {"title": title}
+    ctx.log("info", f"タイトル: {title}")
+    return {"browser": name, "title": title}

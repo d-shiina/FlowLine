@@ -10,8 +10,9 @@ from flowline import node
     label="ドロップダウン選択",
     labels={"ja": "ドロップダウン選択", "en": "Select Option"},
     category="browser",
-    version="0.1.0",
+    version="0.2.0",
     ports={
+        "browser": {"kind": "in", "type": "string", "required": True},
         "selector": {"kind": "in", "type": "string", "required": True},
         "value": {"kind": "in", "type": "string", "required": True},
         "selected": {"kind": "out", "type": "string"},
@@ -30,6 +31,7 @@ from flowline import node
 def run(ports, params, ctx):
     from ._session import run_on_browser, get_page
 
+    browser_name = ports["browser"]
     selector = ports.get("selector") or params.get("selector", "")
     value = ports.get("value") or params.get("value", "")
     by = params.get("by", "value")
@@ -37,15 +39,15 @@ def run(ports, params, ctx):
         raise ValueError("selector が未指定です")
 
     def _do():
-        page = get_page()
+        page = get_page(browser_name)
         if by == "label":
             return page.select_option(selector, label=value)
         elif by == "index":
             return page.select_option(selector, index=int(value))
-        else:
-            return page.select_option(selector, value=value)
+        return page.select_option(selector, value=value)
 
+    ctx.log("info", f"[{browser_name}] 選択: {selector}")
     result = run_on_browser(_do)
     selected = result[0] if result else ""
-    ctx.log("info", f"選択: {selector} → '{selected}'")
+    ctx.log("info", f"選択結果: '{selected}'")
     return {"selected": selected}

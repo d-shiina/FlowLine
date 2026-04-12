@@ -12,8 +12,9 @@ from flowline import node
     label="JavaScript実行",
     labels={"ja": "JavaScript実行", "en": "Evaluate JS"},
     category="browser",
-    version="0.1.0",
+    version="0.2.0",
     ports={
+        "browser": {"kind": "in", "type": "string", "required": True},
         "result": {"kind": "out", "type": "string"},
     },
     params={
@@ -24,11 +25,12 @@ from flowline import node
 def run(ports, params, ctx):
     from ._session import run_on_browser, get_page
 
+    browser_name = ports["browser"]
     expression = params.get("expression", "document.title")
-    ctx.log("info", f"JS実行: {expression[:60]}")
+    ctx.log("info", f"[{browser_name}] JS実行: {expression[:60]}")
 
     def _do():
-        return get_page().evaluate(expression)
+        return get_page(browser_name).evaluate(expression)
 
     result = run_on_browser(_do)
     result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result

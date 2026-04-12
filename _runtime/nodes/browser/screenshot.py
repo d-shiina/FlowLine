@@ -13,8 +13,9 @@ from flowline import node
     label="スクリーンショット",
     labels={"ja": "スクリーンショット", "en": "Screenshot"},
     category="browser",
-    version="0.1.0",
+    version="0.2.0",
     ports={
+        "browser": {"kind": "in", "type": "string", "required": True},
         "path": {"kind": "out", "type": "string"},
     },
     params={
@@ -28,6 +29,7 @@ from flowline import node
 def run(ports, params, ctx):
     from ._session import run_on_browser, get_page
 
+    browser_name = ports["browser"]
     save_dir = params.get("save_dir", "") or os.path.expanduser("~/Desktop")
     filename = params.get("filename", "") or f"flowline_{int(time.time())}.png"
     selector = params.get("selector", "")
@@ -35,12 +37,11 @@ def run(ports, params, ctx):
 
     if not filename.endswith(".png"):
         filename += ".png"
-
     filepath = os.path.join(save_dir, filename)
     os.makedirs(save_dir, exist_ok=True)
 
     def _do():
-        page = get_page()
+        page = get_page(browser_name)
         if selector:
             element = page.query_selector(selector)
             if not element:
@@ -49,7 +50,7 @@ def run(ports, params, ctx):
         else:
             page.screenshot(path=filepath, full_page=full_page)
 
-    ctx.log("info", f"スクリーンショット撮影中")
+    ctx.log("info", f"[{browser_name}] スクリーンショット撮影中")
     run_on_browser(_do)
     ctx.log("info", f"保存: {filepath}")
     return {"path": filepath}

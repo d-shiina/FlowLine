@@ -10,8 +10,9 @@ from flowline import node
     label="テキスト入力",
     labels={"ja": "テキスト入力", "en": "Type Text"},
     category="browser",
-    version="0.1.0",
+    version="0.2.0",
     ports={
+        "browser": {"kind": "in", "type": "string", "required": True},
         "selector": {"kind": "in", "type": "string", "required": True},
         "text": {"kind": "in", "type": "string", "required": True},
     },
@@ -26,6 +27,7 @@ from flowline import node
 def run(ports, params, ctx):
     from ._session import run_on_browser, get_page
 
+    browser_name = ports["browser"]
     selector = ports.get("selector") or params.get("selector", "")
     text = ports.get("text") or params.get("text", "")
     if not selector:
@@ -33,10 +35,10 @@ def run(ports, params, ctx):
 
     clear_first = params.get("clear_first", True)
     delay = float(params.get("delay", 0))
-    ctx.log("info", f"入力: {selector} ← '{text}'")
+    ctx.log("info", f"[{browser_name}] 入力: {selector} ← '{text}'")
 
     def _do():
-        page = get_page()
+        page = get_page(browser_name)
         if clear_first:
             page.fill(selector, text)
         else:

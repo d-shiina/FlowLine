@@ -1,4 +1,4 @@
-"""``browser/close`` — ブラウザセッションを閉じる。"""
+"""``browser/close`` — 指定のブラウザセッションを閉じる。"""
 
 from __future__ import annotations
 
@@ -10,15 +10,22 @@ from flowline import node
     label="ブラウザを閉じる",
     labels={"ja": "ブラウザを閉じる", "en": "Close Browser"},
     category="browser",
-    version="0.1.0",
-    ports={},
+    version="0.2.0",
+    ports={
+        "browser": {"kind": "in", "type": "string", "required": True},
+    },
     params={},
     on_error="ignore",
 )
 def run(ports, params, ctx):
-    from ._session import close
+    from ._session import run_on_browser, close_session
 
-    ctx.log("info", "ブラウザを閉じています")
-    close()
-    ctx.log("info", "ブラウザを閉じました")
+    browser_name = ports["browser"]
+    ctx.log("info", f"ブラウザ「{browser_name}」を閉じています")
+
+    def _do():
+        close_session(browser_name)
+
+    run_on_browser(_do)
+    ctx.log("info", f"ブラウザ「{browser_name}」を閉じました")
     return {}
