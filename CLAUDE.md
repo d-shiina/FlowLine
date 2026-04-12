@@ -12,19 +12,20 @@ WinActor / UiPath の代替を目指す。
 
 ## アーキテクチャの要所
 
-### ブロックモデル
+### 2層モデル (移行中)
 
-- `Block` は action / wait / loop / branch / switch / subroutine の 6 種
-- **loop / branch / switch はフレームとしてレンダリング** — 個別の BlockView を持たない。
-  TrackRow がコンテナフレーム (Blender ノード風ヘッダー + レーン分割) を直接描画する
-- `parentBlockId` + `parentBranch` でコンテナ内包関係を表現。フラットな blocks 配列のまま
-- **`deps` は廃止済み** — 実行順序はスロット順 + コンテナネスト + 同期ポイントで確定する
+**設計**: `tasks/two-level-design.md`
 
-### スロットとレーン
+- **タイムライン (横)**: `Block` はタスクコンテナ。`slot` で並列オーケストレーション
+- **フローチャート (縦)**: `Block.steps: Step[]` でタスク内の逐次ロジックを記述。
+  ダブルクリックで編集画面に入る
+- 制御フロー (loop / branch / switch) は `Step` としてフローチャート内に配置
+- 実行順序: slot 順 (タイムライン) → order 順 (フローチャート) + 同期ポイント
 
-- `Block.slot` は同一レーン内でユニーク。レーンが異なれば同じ slot を共有可能
-- レーン = `laneKey(b) = "${b.parentBlockId}:${b.parentBranch}"`
-- `makeRoomAt()` はレーン単位で衝突検出する
+#### 移行状態
+
+現在は旧モデル (Block.type + コンテナフレーム) と新モデル (Block.steps) が共存。
+`block.steps.length > 0` なら新モデル、それ以外は旧モデルで動作する。
 
 ### レイアウト計算
 
@@ -34,10 +35,9 @@ WinActor / UiPath の代替を目指す。
 
 ### 実行エンジン
 
-- `executor.ts` がトップレベルブロックのみ走査し、loop/branch/switch は再帰
-- Loop: `params.iterations` (回数) or `params.whileCondition` (JSON Logic)
-- Branch: `params.condition` (JSON Logic) → true/false 側を選択
-- Switch: `params.expression` (JSON Logic) → cases マッチ → 勝者実行
+- `executor.ts` がトップレベルブロックのみ走査
+- 新モデル: `executeTask(block)` → `block.steps` を order 順に実行
+- 旧モデル: `executeBlockOrGroup(block)` → type ベースで loop/branch/switch を再帰
 - Sync point: slot ベースのバリア (`slot < sp.slot` の全ブロック完了を待つ)
 
 ### Python 統合
@@ -76,3 +76,15 @@ python3 _runtime/worker.py  # Python worker 単体テスト (stdin に JSON-line
 
 実装タスクは `tasks/` ディレクトリに個別ファイルで管理する。
 Sonnet に実装を依頼する場合: 該当タスクファイルだけ読ませれば OK。
+
+### 現在のタスク
+
+| ファイル | 内容 | 状態 |
+|----------|------|------|
+| `tasks/two-level-design.md` | 2層モデル全体設計 | 設計完了 |
+| `tasks/phase1-data-model.md` | Phase 1: Step 型 + Block.steps 追加 | 未着手 |
+| `tasks/phase2-flowchart-editor.md` | Phase 2: フローチャートエディタ新規作成 | 未着手 |
+| `tasks/phase3-navigation.md` | Phase 3: ダブルクリック遷移 + パンくず | 未着手 |
+| `tasks/phase4-executor.md` | Phase 4: Step ベース実行エンジン | 未着手 |
+| `tasks/phase5-timeline-cleanup.md` | Phase 5: 旧モデル削除 + タイムライン簡素化 | 未着手 |
+| `tasks/sync-visual.md` | 同期ポイント視覚改善 (破線バリア) | 未着手 |
