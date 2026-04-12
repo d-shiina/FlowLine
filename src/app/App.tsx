@@ -11,7 +11,7 @@ import { useTheme } from './useTheme';
 import { useExecution } from './engine';
 import { useNodeManifest } from './useNodeManifest';
 import { computeTracksLayout } from './trackLayout';
-import type { Block, Scenario, Track } from './types';
+import type { Block, EmbeddedNode, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Titlebar } from './components/Titlebar';
 import { Toolbar, type EditMode } from './components/Toolbar';
@@ -212,11 +212,66 @@ export default function App() {
     [],
   );
 
+  // Node manifest from the Python worker. Drives node picker, ports,
+  // params, and the export node-embedding logic.
+  const { manifest: nodeManifest, setManifest: setNodeManifest } =
+    useNodeManifest();
+
   // ─── JSON import / export ──────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleExport = useCallback(() => {
-    const blob = new Blob([JSON.stringify(scenario, null, 2)], {
+  const handleExport = useCallback(async () => {
+    // Collect all nodeIds referenced by steps across all tracks/subroutines.
+    const usedNodeIds = new Set<string>();
+    const collectFromBlocks = (blocks: Block[]) => {
+      for (const b of blocks) {
+        for (const s of b.steps) {
+          if (s.nodeId) usedNodeIds.add(s.nodeId);
+        }
+      }
+    };
+    for (const t of scenario.tracks) collectFromBlocks(t.blocks);
+    collectFromBlocks(scenario.errorHandler.blocks);
+    for (const sub of scenario.subroutines) collectFromBlocks(sub.blocks);
+
+    // Build embeddedNodes by reading each custom node's source.
+    const embeddedNodes: EmbeddedNode[] = [];
+    const runtime = window.flowlineRuntime;
+    if (runtime && usedNodeIds.size > 0) {
+      for (const nodeId of usedNodeIds) {
+        const manifestEntry = nodeManifest.find((n) => n.id === nodeId);
+        if (!manifestEntry) continue;
+        // Derive file path from nodeId (e.g. "debug/log" → "debug/log.py")
+        const path = `${nodeId}.py`;
+        try {
+          const result = await runtime.readNodeSource(path);
+          if (result.ok && result.source) {
+            embeddedNodes.push({
+              id: nodeId,
+              path,
+              source: result.source,
+              manifest: {
+                label: manifestEntry.label,
+                labels: manifestEntry.labels,
+                category: manifestEntry.category,
+                version: manifestEntry.version,
+                ports: manifestEntry.ports,
+                params: manifestEntry.params,
+                onError: manifestEntry.onError,
+              },
+            });
+          }
+        } catch {
+          // Node source not readable — skip embedding.
+        }
+      }
+    }
+
+    const exportData = {
+      ...scenario,
+      ...(embeddedNodes.length > 0 ? { embeddedNodes } : {}),
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
@@ -225,7 +280,7 @@ export default function App() {
     a.download = `${scenario.name || 'flowline-scenario'}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [scenario]);
+  }, [scenario, nodeManifest]);
 
   const handleImport = useCallback(() => fileInputRef.current?.click(), []);
 
@@ -238,7 +293,71 @@ export default function App() {
       if (!parsed.version || !Array.isArray(parsed.tracks)) {
         throw new Error('invalid scenario');
       }
-      store.replace(parsed);
+
+      // Extract embedded nodes if present.
+      const embedded = parsed.embeddedNodes;
+      if (embedded && embedded.length > 0) {
+        const runtime = window.flowlineRuntime;
+        if (runtime) {
+          const installed: string[] = [];
+          const skipped: string[] = [];
+          for (const node of embedded) {
+            try {
+              // Check if the node file already exists.
+              const existing = await runtime.readNodeSource(node.path);
+              if (existing.ok && existing.source) {
+                // File already exists — skip to avoid overwriting user's version.
+                skipped.push(node.id);
+                continue;
+              }
+              // Write the embedded source to disk.
+              const writeResult = await runtime.writeNodeSource(
+                node.path,
+                node.source,
+              );
+              if (writeResult.ok) {
+                installed.push(node.id);
+              }
+            } catch {
+              // Write failed — continue with remaining nodes.
+            }
+          }
+
+          // Reload worker to pick up new nodes.
+          if (installed.length > 0) {
+            try {
+              const reloadResult = await runtime.reloadNodes();
+              if (reloadResult.ok) {
+                setNodeManifest(reloadResult.manifest);
+              }
+            } catch {
+              // Reload failed — nodes may not be available until restart.
+            }
+          }
+
+          // Notify user about what happened.
+          const parts: string[] = [];
+          if (installed.length > 0) {
+            parts.push(
+              `${installed.length} 個のカスタムノードをインストールしました`,
+            );
+          }
+          if (skipped.length > 0) {
+            parts.push(
+              `${skipped.length} 個は既にインストール済みのためスキップしました`,
+            );
+          }
+          if (parts.length > 0) {
+            // Log to console; could also show a toast.
+            // eslint-disable-next-line no-console
+            console.info(`[import] ${parts.join('. ')}`);
+          }
+        }
+      }
+
+      // Strip embeddedNodes from the stored scenario (they're on disk now).
+      const { embeddedNodes: _, ...cleanScenario } = parsed;
+      store.replace(cleanScenario as Scenario);
       setSelected(null);
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -284,13 +403,6 @@ export default function App() {
       ? 'ready'
       : 'missing'
     : 'unknown';
-
-  // Node manifest from the Python worker. Drives the Inspector's
-  // node picker / ports editor / params editor. Empty array when
-  // the worker isn't up, which makes those panels fall back to
-  // "(未設定 / Mock で実行)" — the UI stays fully usable.
-  const { manifest: nodeManifest, setManifest: setNodeManifest } =
-    useNodeManifest();
 
   // ─── samples + variables + node editor ────────────────────────────
   const [samplesOpen, setSamplesOpen] = useState(false);

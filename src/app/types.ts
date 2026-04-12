@@ -99,6 +99,36 @@ export interface Scenario {
    */
   errorHandler: Track;
   subroutines: Subroutine[];
+  /**
+   * Custom node sources embedded at export time so the scenario is
+   * self-contained. On import, these are extracted to `_runtime/nodes/`
+   * and the worker is reloaded.
+   */
+  embeddedNodes?: EmbeddedNode[];
+}
+
+/**
+ * A custom Python node bundled inside a scenario for portability.
+ * Contains the full source so the recipient doesn't need the
+ * original node files installed.
+ */
+export interface EmbeddedNode {
+  /** Node id, e.g. "custom/my-action". */
+  id: string;
+  /** Relative .py path under `_runtime/nodes/`, e.g. "custom/my-action.py". */
+  path: string;
+  /** Python source code. */
+  source: string;
+  /** Manifest snapshot for offline display. */
+  manifest: {
+    label: string;
+    labels: Record<string, string>;
+    category: string;
+    version: string;
+    ports: Record<string, { kind: 'in' | 'out'; type?: string; required?: boolean }>;
+    params: Record<string, unknown>;
+    onError: string;
+  };
 }
 
 /** Fixed id used for the scenario's error handler track. */
