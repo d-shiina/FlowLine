@@ -284,19 +284,44 @@ export class Executor {
     step: Step,
     opts: { isErrorHandler: boolean },
   ): Promise<void> {
+    this.log(
+      'info',
+      containerId,
+      block.id,
+      `ステップ「${step.label}」(${step.type}) 開始`,
+      step.id,
+    );
+
     if (step.type === 'loop') {
       await this.executeStepLoop(containerId, block, step, opts);
-      return;
-    }
-    if (step.type === 'branch') {
+    } else if (step.type === 'branch') {
       await this.executeStepBranch(containerId, block, step, opts);
-      return;
-    }
-    if (step.type === 'switch') {
+    } else if (step.type === 'switch') {
       await this.executeStepSwitch(containerId, block, step, opts);
-      return;
+    } else if (step.type === 'group') {
+      await this.executeStepGroup(containerId, block, step, opts);
+    } else {
+      await this.executeStep(containerId, block, step, opts);
     }
-    await this.executeStep(containerId, block, step, opts);
+
+    const status = this.state.status[step.id];
+    if (status === 'ok') {
+      this.log(
+        'info',
+        containerId,
+        block.id,
+        `ステップ「${step.label}」完了`,
+        step.id,
+      );
+    } else if (status === 'error') {
+      this.log(
+        'error',
+        containerId,
+        block.id,
+        `ステップ「${step.label}」エラー`,
+        step.id,
+      );
+    }
   }
 
   /**
@@ -327,6 +352,41 @@ export class Executor {
       onError: step.onError,
     };
     await this.executeBlock(containerId, nodeCall, opts);
+  }
+
+  /** Execute a group step — runs child steps sequentially. */
+  private async executeStepGroup(
+    containerId: string,
+    block: Block,
+    groupStep: Step,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    this.state.status[groupStep.id] = 'running';
+    this.flush();
+
+    const children = this.stepChildrenOf(block.steps, groupStep.id);
+
+    let failed = false;
+    for (const child of children) {
+      if (this.aborted) {
+        this.markCancelled(child.id);
+        continue;
+      }
+      await this.executeStepOrGroup(containerId, block, child, opts);
+      if (this.state.status[child.id] === 'error') {
+        failed = true;
+        break;
+      }
+    }
+
+    if (this.aborted) {
+      this.state.status[groupStep.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[groupStep.id] = 'error';
+    } else {
+      this.state.status[groupStep.id] = 'ok';
+    }
+    this.flush();
   }
 
   /** Children of a step within the block's step pool, sorted by order. */
@@ -808,6 +868,7 @@ export class Executor {
     trackId: string | undefined,
     blockId: string | undefined,
     message: string,
+    stepId?: string,
   ): void {
     this.state.logs.push({
       id: this.logId++,
@@ -815,6 +876,7 @@ export class Executor {
       level,
       trackId,
       blockId,
+      ...(stepId ? { stepId } : {}),
       message,
     });
     // Bound history so long-running scenarios don't grow unbounded.

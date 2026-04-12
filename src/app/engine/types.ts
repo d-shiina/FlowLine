@@ -28,6 +28,8 @@ export interface LogEntry {
   level: 'info' | 'warn' | 'error';
   trackId?: string;
   blockId?: string;
+  /** Step id within the block's flowchart. */
+  stepId?: string;
   message: string;
 }
 

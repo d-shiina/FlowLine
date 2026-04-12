@@ -742,6 +742,7 @@ export default function App() {
         phase={execution.state.phase}
         phaseLabel={phaseLabel}
         running={execution.running}
+        tracks={scenario.tracks}
       />
 
       {/* Modals */}
