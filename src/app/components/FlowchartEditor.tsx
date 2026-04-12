@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useMemo, useRef, useState } from 'react';
 import type { Block, Step, Subroutine } from '../types';
 import type { BlockStatus } from '../engine';
 import type { NodeManifestEntry } from '../../globals';
@@ -355,7 +355,7 @@ export function FlowchartEditor({
             className="fl-scroll flex-1 overflow-auto"
             onClick={() => setSelectedIds([])}
           >
-            <div className="inline-flex min-h-full min-w-full items-center gap-0 px-6 py-6">
+            <div className="flex h-full w-max min-w-full items-center px-6 py-6">
 
               {topLevelSteps.length === 0 && (
                 <div className="flex-shrink-0 rounded-lg border border-dashed border-fl-border-strong bg-fl-panel-2 px-6 py-4 text-center font-mono text-[10px] text-fl-text-faint">
@@ -363,33 +363,34 @@ export function FlowchartEditor({
                 </div>
               )}
               {topLevelSteps.map((step, i) => (
-                  <div key={step.id} className="flex flex-shrink-0 items-center" data-step-id={step.id}>
-                    {i > 0 && <StepConnector />}
-                    {/* Drop insert indicator */}
-                    {dropInsertIndex === i && dragStepId !== step.id && (
-                      <div className="mr-1 w-[3px] self-stretch rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
-                    )}
-                    {step.type === 'group' ? (
-                      <div data-group-id={step.id}>
-                        <FlowchartGroupView
-                          step={step}
-                          childSteps={block.steps.filter((s) => s.parentStepId === step.id).sort((a, b) => a.order - b.order)}
-                          selected={selectedIds.includes(step.id)}
-                          selectedStepId={selectedStepId}
-                          status={executionStatus[step.id] ?? 'idle'}
-                          executionStatus={executionStatus}
-                          dropTarget={dropGroupId === step.id}
-                          scenarioVariables={scenarioVariables}
-                          onSelect={(id) => handleSelect(id)}
-                          onDelete={handleDeleteStep}
-                          onUpdate={handleUpdateStep}
-                          onAddChild={() => { setAddStepParent(step.id); setAddStepOpen(true); }}
-                          onDragStart={handleDragStart}
-                          onRunStep={onRunStep && !running ? onRunStep : undefined}
-                          manifestMap={manifestMap}
-                        />
-                      </div>
-                    ) : (
+                <Fragment key={step.id}>
+                  {i > 0 && <StepConnector />}
+                  {/* Drop insert indicator */}
+                  {dropInsertIndex === i && dragStepId !== step.id && (
+                    <div className="mx-1 h-24 w-[3px] flex-shrink-0 rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
+                  )}
+                  {step.type === 'group' ? (
+                    <div className="flex-shrink-0" data-step-id={step.id} data-group-id={step.id}>
+                      <FlowchartGroupView
+                        step={step}
+                        childSteps={block.steps.filter((s) => s.parentStepId === step.id).sort((a, b) => a.order - b.order)}
+                        selected={selectedIds.includes(step.id)}
+                        selectedStepId={selectedStepId}
+                        status={executionStatus[step.id] ?? 'idle'}
+                        executionStatus={executionStatus}
+                        dropTarget={dropGroupId === step.id}
+                        scenarioVariables={scenarioVariables}
+                        onSelect={(id) => handleSelect(id)}
+                        onDelete={handleDeleteStep}
+                        onUpdate={handleUpdateStep}
+                        onAddChild={() => { setAddStepParent(step.id); setAddStepOpen(true); }}
+                        onDragStart={handleDragStart}
+                        onRunStep={onRunStep && !running ? onRunStep : undefined}
+                        manifestMap={manifestMap}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex-shrink-0" data-step-id={step.id}>
                       <FlowchartStepView
                         step={step}
                         selected={selectedIds.includes(step.id)}
@@ -402,31 +403,30 @@ export function FlowchartEditor({
                         onDragStart={handleDragStart}
                         onRunStep={onRunStep && !running ? onRunStep : undefined}
                       />
-                    )}
-                  </div>
+                    </div>
+                  )}
+                </Fragment>
               ))}
 
               {/* Drop at end indicator */}
               {dropInsertIndex === topLevelSteps.length && (
-                <div className="ml-1 w-[3px] self-stretch rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
+                <div className="mx-1 h-24 w-[3px] flex-shrink-0 rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
               )}
 
               {/* Add button */}
-              <div className="flex flex-shrink-0 items-center">
-                {topLevelSteps.length > 0 && <StepConnector />}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setAddStepParent(undefined);
-                    setAddStepOpen(true);
-                  }}
-                  className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-fl-border-strong bg-transparent font-mono text-[16px] text-fl-text-faint transition-colors hover:border-[#3b82f6] hover:text-[#3b82f6]"
-                  title="ステップを追加"
-                >
-                  +
-                </button>
-              </div>
+              {topLevelSteps.length > 0 && <StepConnector />}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAddStepParent(undefined);
+                  setAddStepOpen(true);
+                }}
+                className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-fl-border-strong bg-transparent font-mono text-[16px] text-fl-text-faint transition-colors hover:border-[#3b82f6] hover:text-[#3b82f6]"
+                title="ステップを追加"
+              >
+                +
+              </button>
             </div>
           </div>
         </FlowchartContextMenu>
