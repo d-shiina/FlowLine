@@ -112,3 +112,18 @@ contextBridge.exposeInMainWorld('flowlineRuntime', {
   /** Fetch the most recent load-error list reported by the worker. */
   loadErrors: () => ipcRenderer.invoke('runtime:node-load-errors'),
 });
+
+/**
+ * .fls scenario file APIs. Uses native file dialogs so the renderer
+ * never touches raw file paths.
+ */
+contextBridge.exposeInMainWorld('flowlineScenario', {
+  /** Export scenario as .fls (ZIP) or legacy .json. Opens a save dialog. */
+  exportFile: (
+    scenarioJson: string,
+    nodeIds: string[],
+    manifest: unknown[],
+  ) => ipcRenderer.invoke('scenario:export', scenarioJson, nodeIds, manifest),
+  /** Import a .fls or .json file. Opens an open dialog. */
+  importFile: () => ipcRenderer.invoke('scenario:import'),
+});

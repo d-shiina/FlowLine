@@ -18,6 +18,7 @@ import {
   readNodeSource,
   writeNodeSource,
 } from './main/nodeFiles';
+import { packScenario, unpackScenario } from './main/scenarioFile';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -203,6 +204,41 @@ ipcMain.handle('runtime:reload-nodes', async () => {
     return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: (err as Error).message ?? String(err) };
+  }
+});
+
+// ── .fls scenario file handlers ─────────────────────────────
+ipcMain.handle(
+  'scenario:export',
+  async (e, scenarioJson: string, nodeIds: string[], manifest: unknown[]) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return { ok: false, error: 'no window' };
+    try {
+      return await packScenario(
+        win,
+        scenarioJson,
+        nodeIds,
+        manifest as Array<{ id: string; [key: string]: unknown }>,
+      );
+    } catch (err) {
+      return { ok: false, error: (err as Error).message ?? String(err) };
+    }
+  },
+);
+
+ipcMain.handle('scenario:import', async (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win) return { ok: false, error: 'no window' };
+  try {
+    return await unpackScenario(win);
+  } catch (err) {
+    return {
+      ok: false,
+      error: (err as Error).message ?? String(err),
+      installedNodes: [],
+      updatedNodes: [],
+      skippedNodes: [],
+    };
   }
 });
 

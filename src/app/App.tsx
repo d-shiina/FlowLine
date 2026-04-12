@@ -11,7 +11,7 @@ import { useTheme } from './useTheme';
 import { useExecution } from './engine';
 import { useNodeManifest } from './useNodeManifest';
 import { computeTracksLayout } from './trackLayout';
-import type { Block, EmbeddedNode, Scenario, Track } from './types';
+import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Titlebar } from './components/Titlebar';
 import { Toolbar, type EditMode } from './components/Toolbar';
@@ -37,15 +37,6 @@ import { FlowchartEditor } from './components/FlowchartEditor';
  * The error handler track is rendered below the add-track row; it cannot
  * receive sync points.
  */
-/** SHA-256 hex digest using the Web Crypto API. */
-async function sha256(text: string): Promise<string> {
-  const data = new TextEncoder().encode(text);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
 type EditorMode =
   | { type: 'scenario' }
   | { type: 'subroutine'; id: string };
@@ -226,74 +217,78 @@ export default function App() {
   const { manifest: nodeManifest, setManifest: setNodeManifest } =
     useNodeManifest();
 
-  // ─── JSON import / export ──────────────────────────────────────────
+  // ─── .fls / JSON import / export ───────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(async () => {
-    // Collect all nodeIds referenced by steps across all tracks/subroutines.
-    const usedNodeIds = new Set<string>();
-    const collectFromBlocks = (blocks: Block[]) => {
-      for (const b of blocks) {
-        for (const s of b.steps) {
-          if (s.nodeId) usedNodeIds.add(s.nodeId);
-        }
-      }
-    };
-    for (const t of scenario.tracks) collectFromBlocks(t.blocks);
-    collectFromBlocks(scenario.errorHandler.blocks);
-    for (const sub of scenario.subroutines) collectFromBlocks(sub.blocks);
-
-    // Build embeddedNodes by reading each custom node's source.
-    const embeddedNodes: EmbeddedNode[] = [];
-    const runtime = window.flowlineRuntime;
-    if (runtime && usedNodeIds.size > 0) {
-      for (const nodeId of usedNodeIds) {
-        const manifestEntry = nodeManifest.find((n) => n.id === nodeId);
-        if (!manifestEntry) continue;
-        const path = `${nodeId}.py`;
-        try {
-          const result = await runtime.readNodeSource(path);
-          if (result.ok && result.source) {
-            const hashHex = await sha256(result.source);
-            embeddedNodes.push({
-              id: nodeId,
-              path,
-              sourceHash: hashHex,
-              source: result.source,
-              manifest: {
-                label: manifestEntry.label,
-                labels: manifestEntry.labels,
-                category: manifestEntry.category,
-                version: manifestEntry.version,
-                ports: manifestEntry.ports,
-                params: manifestEntry.params,
-                onError: manifestEntry.onError,
-              },
-            });
+    const scenarioApi = window.flowlineScenario;
+    if (scenarioApi) {
+      // Native .fls export via Electron main process.
+      const usedNodeIds = new Set<string>();
+      const collectFromBlocks = (blocks: Block[]) => {
+        for (const b of blocks) {
+          for (const s of b.steps) {
+            if (s.nodeId) usedNodeIds.add(s.nodeId);
           }
-        } catch {
-          // Node source not readable — skip embedding.
         }
-      }
+      };
+      for (const t of scenario.tracks) collectFromBlocks(t.blocks);
+      collectFromBlocks(scenario.errorHandler.blocks);
+      for (const sub of scenario.subroutines) collectFromBlocks(sub.blocks);
+
+      await scenarioApi.exportFile(
+        JSON.stringify(scenario),
+        [...usedNodeIds],
+        nodeManifest,
+      );
+      return;
     }
 
-    const exportData = {
-      ...scenario,
-      ...(embeddedNodes.length > 0 ? { embeddedNodes } : {}),
-    };
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+    // Fallback: browser-only JSON export (no node embedding).
+    const blob = new Blob([JSON.stringify(scenario, null, 2)], {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${scenario.name || 'flowline-scenario'}.json`;
+    a.download = `${scenario.name || 'flowline-scenario'}.fls.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, [scenario, nodeManifest]);
 
-  const handleImport = useCallback(() => fileInputRef.current?.click(), []);
+  const handleImport = useCallback(async () => {
+    const scenarioApi = window.flowlineScenario;
+    if (scenarioApi) {
+      // Native .fls import via Electron main process.
+      const result = await scenarioApi.importFile();
+      if (!result.ok || !result.scenario) return;
 
+      // Reload manifest if nodes were installed/updated.
+      if (
+        result.installedNodes.length > 0 ||
+        result.updatedNodes.length > 0
+      ) {
+        const runtime = window.flowlineRuntime;
+        if (runtime) {
+          try {
+            const reload = await runtime.reloadNodes();
+            if (reload.ok) setNodeManifest(reload.manifest);
+          } catch {
+            // Will pick up on next worker restart.
+          }
+        }
+      }
+
+      store.replace(result.scenario as Scenario);
+      setSelected(null);
+      return;
+    }
+
+    // Fallback: browser file picker.
+    fileInputRef.current?.click();
+  }, [store, setNodeManifest]);
+
+  // Legacy browser file handler (used when flowlineScenario API is unavailable).
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -303,84 +298,8 @@ export default function App() {
       if (!parsed.version || !Array.isArray(parsed.tracks)) {
         throw new Error('invalid scenario');
       }
-
-      // Extract embedded nodes if present.
-      const embedded = parsed.embeddedNodes;
-      if (embedded && embedded.length > 0) {
-        const runtime = window.flowlineRuntime;
-        if (runtime) {
-          const installed: string[] = [];
-          const skipped: string[] = [];
-          const updated: string[] = [];
-          for (const node of embedded) {
-            try {
-              // Check if the node file already exists.
-              const existing = await runtime.readNodeSource(node.path);
-              if (existing.ok && existing.source) {
-                // Compare hashes to detect identical vs. different versions.
-                const existingHash = await sha256(existing.source);
-                if (node.sourceHash && existingHash === node.sourceHash) {
-                  // Identical source — no action needed.
-                  skipped.push(node.id);
-                  continue;
-                }
-                // Different version — update to the embedded version.
-                const writeResult = await runtime.writeNodeSource(
-                  node.path,
-                  node.source,
-                );
-                if (writeResult.ok) updated.push(node.id);
-                continue;
-              }
-              // File doesn't exist — write new.
-              const writeResult = await runtime.writeNodeSource(
-                node.path,
-                node.source,
-              );
-              if (writeResult.ok) {
-                installed.push(node.id);
-              }
-            } catch {
-              // Write failed — continue with remaining nodes.
-            }
-          }
-
-          // Reload worker to pick up new/updated nodes.
-          if (installed.length > 0 || updated.length > 0) {
-            try {
-              const reloadResult = await runtime.reloadNodes();
-              if (reloadResult.ok) {
-                setNodeManifest(reloadResult.manifest);
-              }
-            } catch {
-              // Reload failed — nodes may not be available until restart.
-            }
-          }
-
-          // Notify user about what happened.
-          const parts: string[] = [];
-          if (installed.length > 0) {
-            parts.push(`${installed.length} 個の新規ノードをインストール`);
-          }
-          if (updated.length > 0) {
-            parts.push(`${updated.length} 個のノードを更新`);
-          }
-          if (skipped.length > 0) {
-            parts.push(
-              `${skipped.length} 個は既にインストール済みのためスキップしました`,
-            );
-          }
-          if (parts.length > 0) {
-            // Log to console; could also show a toast.
-            // eslint-disable-next-line no-console
-            console.info(`[import] ${parts.join('. ')}`);
-          }
-        }
-      }
-
-      // Strip embeddedNodes from the stored scenario (they're on disk now).
-      const { embeddedNodes: _, ...cleanScenario } = parsed;
-      store.replace(cleanScenario as Scenario);
+      const { embeddedNodes: _, ...clean } = parsed;
+      store.replace(clean as Scenario);
       setSelected(null);
     } catch (err) {
       // eslint-disable-next-line no-console

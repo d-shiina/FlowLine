@@ -130,10 +130,27 @@ export interface FlowlineRuntimeAPI {
   loadErrors(): Promise<NodeLoadError[]>;
 }
 
+export interface FlowlineScenarioAPI {
+  exportFile(
+    scenarioJson: string,
+    nodeIds: string[],
+    manifest: unknown[],
+  ): Promise<{ ok: boolean; filePath?: string; error?: string }>;
+  importFile(): Promise<{
+    ok: boolean;
+    scenario?: unknown;
+    installedNodes: string[];
+    updatedNodes: string[];
+    skippedNodes: string[];
+    error?: string;
+  }>;
+}
+
 declare global {
   interface Window {
     flowlineWindow?: FlowlineWindowAPI;
     flowlineRuntime?: FlowlineRuntimeAPI;
+    flowlineScenario?: FlowlineScenarioAPI;
   }
 }
 
