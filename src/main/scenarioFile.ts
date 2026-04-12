@@ -2,8 +2,9 @@ import { app, dialog, type BrowserWindow } from 'electron';
 import fsp from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import crossZip from 'cross-zip';
+import { pipeline } from 'node:stream/promises';
+import { ZipFile } from 'yazl';
+import yauzl from 'yauzl';
 import { readNodeSource, writeNodeSource } from './nodeFiles';
 
 /**
@@ -15,13 +16,8 @@ import { readNodeSource, writeNodeSource } from './nodeFiles';
  *   nodes/<id>.py        — one file per custom node referenced by the scenario
  *   nodes/manifest.json  — manifest snapshots for each bundled node
  *
- * This keeps scenario.json lightweight regardless of how many nodes
- * exist, while remaining fully self-contained and portable.
+ * Uses yazl/yauzl (pure JS, no native deps) so it works on all platforms.
  */
-
-function nodesRoot(): string {
-  return path.join(app.getAppPath(), '_runtime', 'nodes');
-}
 
 interface PackResult {
   ok: boolean;
@@ -31,7 +27,6 @@ interface PackResult {
 
 /**
  * Export a scenario as a .fls file.
- * Collects referenced node sources and bundles everything into a ZIP.
  */
 export async function packScenario(
   win: BrowserWindow,
@@ -39,7 +34,6 @@ export async function packScenario(
   nodeIds: string[],
   manifest: Array<{ id: string; [key: string]: unknown }>,
 ): Promise<PackResult> {
-  // Ask user where to save.
   const scenario = JSON.parse(scenarioJson);
   const defaultName = `${scenario.name || 'flowline-scenario'}.fls`;
   const result = await dialog.showSaveDialog(win, {
@@ -56,59 +50,51 @@ export async function packScenario(
 
   const savePath = result.filePath;
 
-  // If user chose .json, just write the JSON directly (legacy export).
+  // Legacy .json export.
   if (savePath.endsWith('.json')) {
     await fsp.writeFile(savePath, scenarioJson, 'utf-8');
     return { ok: true, filePath: savePath };
   }
 
-  // Build .fls (ZIP) in a temp directory.
-  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'fls-'));
-  try {
-    // Write scenario.json (clean, no embeddedNodes).
-    const { embeddedNodes: _, ...cleanScenario } = scenario;
-    await fsp.writeFile(
-      path.join(tmpDir, 'scenario.json'),
-      JSON.stringify(cleanScenario, null, 2),
-      'utf-8',
-    );
+  // Build .fls (ZIP) using yazl.
+  const zip = new ZipFile();
 
-    // Collect node sources.
-    const nodesDir = path.join(tmpDir, 'nodes');
-    await fsp.mkdir(nodesDir, { recursive: true });
-    const bundledManifest: Array<{ id: string; path: string; [key: string]: unknown }> = [];
+  // Add scenario.json (clean, no embeddedNodes).
+  const { embeddedNodes: _, ...cleanScenario } = scenario;
+  zip.addBuffer(
+    Buffer.from(JSON.stringify(cleanScenario, null, 2), 'utf-8'),
+    'scenario.json',
+  );
 
-    for (const nodeId of nodeIds) {
-      const pyPath = `${nodeId}.py`;
-      const source = await readNodeSource(pyPath);
-      if (!source) continue;
+  // Collect and add node sources.
+  const bundledManifest: Array<{ id: string; path: string; [key: string]: unknown }> = [];
+  for (const nodeId of nodeIds) {
+    const pyPath = `${nodeId}.py`;
+    const source = await readNodeSource(pyPath);
+    if (!source) continue;
 
-      // Write .py to temp nodes/ dir.
-      const destPath = path.join(nodesDir, pyPath);
-      await fsp.mkdir(path.dirname(destPath), { recursive: true });
-      await fsp.writeFile(destPath, source, 'utf-8');
+    zip.addBuffer(Buffer.from(source, 'utf-8'), `nodes/${pyPath}`, {
+      compress: true,
+    });
 
-      // Find manifest entry.
-      const m = manifest.find((n) => n.id === nodeId);
-      if (m) bundledManifest.push({ ...m, path: pyPath });
-    }
-
-    // Write nodes/manifest.json.
-    if (bundledManifest.length > 0) {
-      await fsp.writeFile(
-        path.join(nodesDir, 'manifest.json'),
-        JSON.stringify(bundledManifest, null, 2),
-        'utf-8',
-      );
-    }
-
-    // ZIP the temp directory into the target .fls file.
-    crossZip.zipSync(tmpDir, savePath);
-    return { ok: true, filePath: savePath };
-  } finally {
-    // Clean up temp directory.
-    await fsp.rm(tmpDir, { recursive: true, force: true });
+    const m = manifest.find((n) => n.id === nodeId);
+    if (m) bundledManifest.push({ ...m, path: pyPath });
   }
+
+  // Add manifest.
+  if (bundledManifest.length > 0) {
+    zip.addBuffer(
+      Buffer.from(JSON.stringify(bundledManifest, null, 2), 'utf-8'),
+      'nodes/manifest.json',
+    );
+  }
+
+  // Finalize and write to disk.
+  zip.end();
+  const writeStream = fs.createWriteStream(savePath);
+  await pipeline(zip.outputStream, writeStream);
+
+  return { ok: true, filePath: savePath };
 }
 
 interface UnpackResult {
@@ -121,7 +107,7 @@ interface UnpackResult {
 }
 
 /**
- * Import a .fls file. Extracts the scenario and installs bundled nodes.
+ * Import a .fls file.
  */
 export async function unpackScenario(
   win: BrowserWindow,
@@ -152,77 +138,88 @@ export async function unpackScenario(
     };
   }
 
-  // .fls (ZIP) import.
-  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'fls-import-'));
-  try {
-    crossZip.unzipSync(filePath, tmpDir);
-
-    // Read scenario.json.
-    const scenarioPath = path.join(tmpDir, 'scenario.json');
-    const scenarioText = await fsp.readFile(scenarioPath, 'utf-8');
-    const scenario = JSON.parse(scenarioText);
-
-    // Install bundled nodes.
-    const installed: string[] = [];
-    const updated: string[] = [];
-    const skipped: string[] = [];
-
-    const nodesDir = path.join(tmpDir, 'nodes');
-    const nodeFiles = await collectPyFiles(nodesDir);
-    for (const relPath of nodeFiles) {
-      const bundledSource = await fsp.readFile(
-        path.join(nodesDir, relPath),
-        'utf-8',
-      );
-      const existingSource = await readNodeSource(relPath);
-
-      if (existingSource) {
-        // Compare content.
-        if (existingSource === bundledSource) {
-          skipped.push(relPath);
-          continue;
-        }
-        // Different version — update.
-        await writeNodeSource(relPath, bundledSource);
-        updated.push(relPath);
-      } else {
-        // New node.
-        await writeNodeSource(relPath, bundledSource);
-        installed.push(relPath);
-      }
-    }
-
+  // .fls (ZIP) import using yauzl.
+  const entries = await readZipEntries(filePath);
+  const scenarioEntry = entries.get('scenario.json');
+  if (!scenarioEntry) {
     return {
-      ok: true,
-      scenario,
-      installedNodes: installed,
-      updatedNodes: updated,
-      skippedNodes: skipped,
+      ok: false,
+      error: 'scenario.json が見つかりません',
+      installedNodes: [],
+      updatedNodes: [],
+      skippedNodes: [],
     };
-  } finally {
-    await fsp.rm(tmpDir, { recursive: true, force: true });
   }
+
+  const scenario = JSON.parse(scenarioEntry);
+
+  // Install bundled nodes.
+  const installed: string[] = [];
+  const updated: string[] = [];
+  const skipped: string[] = [];
+
+  for (const [entryPath, content] of entries) {
+    if (!entryPath.startsWith('nodes/') || !entryPath.endsWith('.py')) continue;
+    const relPath = entryPath.slice('nodes/'.length); // e.g. "custom/my-node.py"
+
+    const existingSource = await readNodeSource(relPath);
+    if (existingSource) {
+      if (existingSource === content) {
+        skipped.push(relPath);
+      } else {
+        await writeNodeSource(relPath, content);
+        updated.push(relPath);
+      }
+    } else {
+      await writeNodeSource(relPath, content);
+      installed.push(relPath);
+    }
+  }
+
+  return {
+    ok: true,
+    scenario,
+    installedNodes: installed,
+    updatedNodes: updated,
+    skippedNodes: skipped,
+  };
 }
 
-/** Recursively collect .py files under a directory. */
-async function collectPyFiles(dir: string): Promise<string[]> {
-  const out: string[] = [];
-  async function walk(d: string, prefix: string): Promise<void> {
-    let entries;
-    try {
-      entries = await fsp.readdir(d, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        await walk(path.join(d, entry.name), rel);
-      } else if (entry.isFile() && entry.name.endsWith('.py')) {
-        out.push(rel);
-      }
-    }
-  }
-  await walk(dir, '');
-  return out;
+/**
+ * Read all entries from a ZIP file into a Map<path, content>.
+ * Uses yauzl (pure JS, no native deps).
+ */
+function readZipEntries(zipPath: string): Promise<Map<string, string>> {
+  return new Promise((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true, autoClose: true }, (err, zipfile) => {
+      if (err || !zipfile) return reject(err ?? new Error('failed to open zip'));
+      const map = new Map<string, string>();
+      const zf = zipfile as any; // readEntry() not in minimal typings
+
+      const readNext = () => zf.readEntry();
+
+      zipfile.on('entry', (entry: yauzl.Entry) => {
+        if (entry.fileName.endsWith('/')) {
+          readNext();
+          return;
+        }
+        zipfile.openReadStream(entry, (readErr, stream) => {
+          if (readErr || !stream) {
+            readNext();
+            return;
+          }
+          const chunks: Buffer[] = [];
+          stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+          stream.on('end', () => {
+            map.set(entry.fileName, Buffer.concat(chunks).toString('utf-8'));
+            readNext();
+          });
+        });
+      });
+
+      zipfile.on('end', () => resolve(map));
+      zipfile.on('error', reject);
+      readNext();
+    });
+  });
 }
