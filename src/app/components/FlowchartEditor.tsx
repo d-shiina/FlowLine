@@ -873,6 +873,7 @@ export function FlowchartEditor({
         nextOrder={nextOrder}
         parentStepId={addStepParent}
         subroutines={subroutines}
+        nodeManifest={nodeManifest}
         onAdd={handleAddStep}
       />
     </div>
