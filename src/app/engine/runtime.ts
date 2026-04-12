@@ -1,5 +1,22 @@
-import type { Block } from '../types';
+import type { OnError, PortBinding, StepType } from '../types';
 import type { LogEntry } from './types';
+
+/**
+ * Minimal descriptor of a single node execution. Built from a Step by
+ * the executor and passed to the Runtime so the runtime never needs to
+ * read Block-level properties.
+ */
+export interface NodeCall {
+  id: string;
+  label: string;
+  type: StepType;
+  nodeId?: string;
+  params?: Record<string, unknown>;
+  bindings?: Record<string, PortBinding>;
+  timeout?: number;
+  skipIfMissing?: boolean;
+  onError?: OnError;
+}
 
 /**
  * A `Runtime` is the pluggable layer that actually "runs" a block.
@@ -44,24 +61,24 @@ export interface RuntimeResult {
 }
 
 export interface Runtime {
-  run(block: Block, ctx: NodeContext): Promise<RuntimeResult>;
+  run(node: NodeCall, ctx: NodeContext): Promise<RuntimeResult>;
 }
 
 /**
- * Pure-TS placeholder runtime. Each block "runs" by sleeping for a
- * type-dependent duration, emitting a couple of log lines. Blocks whose
+ * Pure-TS placeholder runtime. Each step "runs" by sleeping for a
+ * type-dependent duration, emitting a couple of log lines. Steps whose
  * label contains the literal string `FAIL` deterministically fail, which
  * lets scenarios author test error paths without wiring anything up.
  *
- * Blocks whose label contains `MISSING` fail with `missing: true` so the
+ * Steps whose label contains `MISSING` fail with `missing: true` so the
  * `skipIfMissing` path can be exercised.
  */
 export class MockRuntime implements Runtime {
-  async run(block: Block, ctx: NodeContext): Promise<RuntimeResult> {
-    const duration = this.durationFor(block);
+  async run(node: NodeCall, ctx: NodeContext): Promise<RuntimeResult> {
+    const duration = this.durationFor(node);
     ctx.log('info', `実行開始 (~${duration}ms)`);
 
-    // Cooperative sleep so abort can tear us down mid-block.
+    // Cooperative sleep so abort can tear us down mid-step.
     const step = 50;
     let elapsed = 0;
     while (elapsed < duration) {
@@ -72,11 +89,11 @@ export class MockRuntime implements Runtime {
       elapsed += step;
     }
 
-    if (/MISSING/i.test(block.label)) {
+    if (/MISSING/i.test(node.label)) {
       ctx.log('warn', 'ターゲットが見つかりません');
       return { ok: false, errorMessage: 'target missing', missing: true };
     }
-    if (/FAIL/i.test(block.label)) {
+    if (/FAIL/i.test(node.label)) {
       ctx.log('error', 'ノード実行に失敗');
       return { ok: false, errorMessage: 'mock failure' };
     }
@@ -85,8 +102,8 @@ export class MockRuntime implements Runtime {
     return { ok: true };
   }
 
-  private durationFor(block: Block): number {
-    switch (block.type) {
+  private durationFor(node: NodeCall): number {
+    switch (node.type) {
       case 'wait':
         return 900;
       case 'loop':

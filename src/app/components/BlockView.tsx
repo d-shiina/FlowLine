@@ -1,40 +1,21 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BLOCK_META, type Block, type Subroutine } from '../types';
+import type { Block } from '../types';
 import type { BlockStatus } from '../engine';
 import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, pxToSlot } from '../layout';
-import type { BlockLaneInfo, ContainerFrame } from '../trackLayout';
 
 interface Props {
   block: Block;
   trackId: string;
+  accentColor: string;
   status: BlockStatus;
   selected: boolean;
   draggable: boolean;
-  /**
-   * Container frames that currently exist on the same track. Used by
-   * the drag handler to auto-reparent a block when it's dropped over
-   * a loop / branch / switch scope. When `block` IS a container, its
-   * own frame is excluded from the hit-test so you can't nest it
-   * inside itself.
-   */
-  containerFrames: ContainerFrame[];
-  /** Lane info when the block lives in a multi-case container. */
-  lane?: BlockLaneInfo;
-  /** Actual track row height (may grow for tall switches). */
   trackHeight: number;
-  subroutines: Subroutine[];
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
   onDelete: (trackId: string, blockId: string) => void;
   onDoubleClick: (trackId: string, blockId: string) => void;
-}
-
-interface Badge {
-  key: string;
-  icon: string;
-  color: string;
-  tooltip: string;
 }
 
 /** Live position + size of the drop-target ghost in viewport coordinates. */
@@ -45,145 +26,91 @@ interface GhostState {
 }
 
 /**
- * Derive visual badges for block attributes that deviate from defaults.
- * Default attributes get no badge so the timeline stays quiet.
- */
-function computeBadges(block: Block): Badge[] {
-  const badges: Badge[] = [];
-  if (block.skipIfMissing) {
-    badges.push({
-      key: 'skip-if-missing',
-      icon: '?',
-      color: '#eab308',
-      tooltip: 'ターゲットが見つからなくてもOK',
-    });
-  }
-  if (typeof block.onError === 'object' && 'retry' in block.onError) {
-    badges.push({
-      key: 'retry',
-      icon: `↻${block.onError.retry}`,
-      color: '#60a5fa',
-      tooltip: `${block.onError.retry}回リトライ`,
-    });
-  } else if (block.onError === 'skip') {
-    badges.push({
-      key: 'on-error-skip',
-      icon: '→',
-      color: '#a855f7',
-      tooltip: 'エラーでもスキップ',
-    });
-  } else if (block.onError === 'ignore') {
-    badges.push({
-      key: 'on-error-ignore',
-      icon: '∅',
-      color: '#64748b',
-      tooltip: 'エラーを無視',
-    });
-  }
-  if (block.timeout !== undefined && block.timeout >= 60) {
-    badges.push({
-      key: 'timeout',
-      icon: '⏱',
-      color: '#06b6d4',
-      tooltip: `タイムアウト ${block.timeout}s`,
-    });
-  }
-  return badges;
-}
-
-/**
- * A single block rendered at its `slot` position. Dragging uses a
- * drag-then-commit pattern: the source stays in place (dimmed) while a
- * ghost rectangle previews the drop slot. The actual mutation only fires
- * on mouseup so other blocks don't thrash, and a synthesized click right
- * after the drag is swallowed so it doesn't accidentally open the "add
- * block" dialog on the track underneath.
- * Fixed width — span was removed (see docs/01-concept.md).
+ * A single task block rendered at its `slot` position on the timeline.
+ * All execution logic lives inside block.steps — the card is a pure
+ * task container with no type-based visual differentiation.
  */
 export function BlockView({
   block,
   trackId,
+  accentColor,
   status,
   selected,
   draggable,
-  containerFrames,
-  lane,
   trackHeight,
-  subroutines,
   onSelect,
   onUpdate,
   onDelete,
   onDoubleClick,
 }: Props) {
-  const meta = BLOCK_META[block.type];
   const [hov, setHov] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [ghost, setGhost] = useState<GhostState | null>(null);
-  const subRef =
-    block.type === 'subroutine' && block.subroutineId
-      ? subroutines.find((s) => s.id === block.subroutineId)
-      : undefined;
-  const displayLabel =
-    block.type === 'subroutine'
-      ? subRef
-        ? subRef.name
-        : '(未割当)'
-      : block.label;
 
   const left = block.slot * SLOT_PX + BLOCK_MARGIN;
   const width = BLOCK_W;
+  const blockTop = 8;
+  const blockH = trackHeight - 16;
 
-  // Vertical placement depends on whether this block lives in a
-  // container frame. Frames carry a 16 px header strip at the top
-  // (the Blender-style label bar), so children are offset below
-  // it. Multi-lane containers split the remaining body height
-  // among their cases; loop bodies get the whole body as one lane.
-  const FRAME_INSET = 3;
-  const FRAME_HEADER = 16;
-  let blockTop = 8;
-  let blockH = trackHeight - 16;
-  if (lane) {
-    const bodyTop = FRAME_INSET + FRAME_HEADER;
-    const bodyH = trackHeight - bodyTop - FRAME_INSET;
-    const laneH = bodyH / Math.max(1, lane.laneCount);
-    blockTop = bodyTop + lane.laneIndex * laneH + 2;
-    blockH = laneH - 4;
-  }
+  const isRunning = status === 'running';
+  const isError = status === 'error';
+  const isOk = status === 'ok';
+  const isSkipped = status === 'skipped';
+  const isCancelled = status === 'cancelled';
+  const isFaded = isSkipped || isCancelled;
+
+  const borderColor = isError
+    ? '#ef4444'
+    : isRunning
+      ? accentColor
+      : selected
+        ? accentColor
+        : isOk
+          ? `${accentColor}44`
+          : isFaded
+            ? '#94a3b855'
+            : `${accentColor}${hov ? 'cc' : '66'}`;
+
+  const background = isError
+    ? '#ef44441f'
+    : isRunning
+      ? `${accentColor}44`
+      : isOk
+        ? `${accentColor}10`
+        : isFaded
+          ? 'transparent'
+          : hov
+            ? `${accentColor}28`
+            : `${accentColor}18`;
+
+  const shadow = isError
+    ? '0 0 18px #ef444488'
+    : isRunning
+      ? `0 0 18px ${accentColor}aa`
+      : selected
+        ? `0 0 0 1px ${accentColor}88`
+        : 'none';
+
+  const zIndex = isRunning || isError ? 5 : selected ? 4 : 2;
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     onSelect(trackId, block.id);
-    if (!draggable) return; // link/sync mode: select only, no drag
+    if (!draggable) return;
 
-    // The block is anchored to its current track: dragging only changes
-    // the slot within this track. Cross-track moves tangled the DAG
-    // edges and changed ownership semantics, so they were removed — use
-    // cut/paste or re-add in the target track instead.
     const node = e.currentTarget as HTMLElement;
     const trackCanvas = node.closest<HTMLElement>(
       `[data-container-id="${trackId}"]`,
     );
-    if (!trackCanvas) return; // defensive: nothing to drag relative to
+    if (!trackCanvas) return;
 
     const startX = e.clientX;
-    const startY = e.clientY;
     let didMove = false;
     let targetSlot = block.slot;
-    /**
-     * The container frame the cursor is hovering over, updated in
-     * real time by ``updateTarget``. On drop, the block auto-re-
-     * parents into that container (and picks the right case lane
-     * for branch / switch containers by hit-testing the Y axis).
-     */
-    let landingFrame: ContainerFrame | null = null;
-    let landingCase: string | undefined = undefined;
 
     const prevPointerEvents = node.style.pointerEvents;
     const beginDrag = () => {
-      // Let clicks fall through the block to the canvas so the track
-      // still receives mouseup under the cursor (keeps the click-swallow
-      // logic predictable).
       node.style.pointerEvents = 'none';
       setDragging(true);
     };
@@ -192,59 +119,17 @@ export function BlockView({
       const rect = trackCanvas.getBoundingClientRect();
       const raw = Math.max(0, pxToSlot(ev.clientX - rect.left));
       targetSlot = raw;
-
-      // Find the container frame the cursor is over (ignoring this
-      // block's own frame so a loop can't be dropped into itself).
-      const hits = containerFrames.filter(
-        (f) =>
-          f.block.id !== block.id &&
-          targetSlot >= f.fromSlot &&
-          targetSlot <= f.toSlot,
-      );
-      landingFrame = hits.length > 0 ? hits[hits.length - 1] : null;
-      landingCase = undefined;
-
-      // Compute the ghost's Y based on the landing lane. Every
-      // container frame carries a 16 px header strip at the top,
-      // so the usable body starts below it. Multi-lane containers
-      // split the body among their cases; single-lane loops fill
-      // the whole body.
-      let ghostTop = rect.top + 8;
-      let ghostH = blockH;
-      if (landingFrame) {
-        const frameTop = rect.top + 3;
-        const bodyTop = frameTop + 16;
-        const bodyH = trackHeight - 6 - 16;
-        const lanes = Math.max(1, landingFrame.cases.length);
-        const laneH = bodyH / lanes;
-        if (lanes > 1) {
-          const yInBody = ev.clientY - bodyTop;
-          const idx = Math.max(
-            0,
-            Math.min(lanes - 1, Math.floor(yInBody / laneH)),
-          );
-          landingCase = landingFrame.cases[idx];
-          ghostTop = bodyTop + idx * laneH + 2;
-          ghostH = laneH - 4;
-        } else {
-          landingCase = landingFrame.cases[0] ?? undefined;
-          ghostTop = bodyTop + 2;
-          ghostH = bodyH - 4;
-        }
-      }
-
       setGhost({
         left: rect.left + targetSlot * SLOT_PX + BLOCK_MARGIN,
-        top: ghostTop,
-        height: ghostH,
+        top: rect.top + blockTop,
+        height: blockH,
       });
     };
 
     const onMove = (ev: MouseEvent) => {
       if (!didMove) {
         const dx = Math.abs(ev.clientX - startX);
-        const dy = Math.abs(ev.clientY - startY);
-        if (dx > 3 || dy > 3) {
+        if (dx > 3) {
           didMove = true;
           beginDrag();
         }
@@ -267,48 +152,10 @@ export function BlockView({
 
     const onUp = () => {
       teardown();
-
       if (!didMove || cancelled) return;
-
-      // Drop result already computed by updateTarget: landingFrame
-      // is the container we're hovering (null when outside every
-      // frame), landingCase is the specific lane we'd assign to
-      // within that container.
-      const patch: Partial<Block> = {};
-      if (targetSlot !== block.slot) patch.slot = targetSlot;
-
-      const nextParentId = landingFrame?.block.id;
-      if (nextParentId !== block.parentBlockId) {
-        patch.parentBlockId = nextParentId;
+      if (targetSlot !== block.slot) {
+        onUpdate(trackId, block.id, { slot: targetSlot });
       }
-
-      if (nextParentId === undefined) {
-        // Un-nested — drop any lingering case label so the block
-        // renders full-height.
-        if (block.parentBranch !== undefined) {
-          patch.parentBranch = undefined;
-        }
-      } else if (landingFrame && landingFrame.cases.length > 1) {
-        // Multi-case container: honour whichever lane the cursor
-        // was over at drop time. Falls back to the first case when
-        // landingCase somehow ends up undefined.
-        const nextCase = landingCase ?? landingFrame.cases[0];
-        if (nextCase !== block.parentBranch) {
-          patch.parentBranch = nextCase;
-        }
-      } else if (block.parentBranch !== undefined) {
-        // Single-lane container (loop): clear any stale case label
-        // from a previous parent.
-        patch.parentBranch = undefined;
-      }
-
-      if (Object.keys(patch).length > 0) {
-        onUpdate(trackId, block.id, patch);
-      }
-
-      // Swallow the click that the browser synthesizes after the
-      // mouseup. Without this the click bubbles to the track canvas'
-      // onClick and opens the "add block" dialog at the drop slot.
       const swallow = (ev: MouseEvent) => {
         ev.stopPropagation();
         ev.preventDefault();
@@ -317,8 +164,6 @@ export function BlockView({
       window.addEventListener('click', swallow, true);
     };
 
-    // Pressing Escape during a drag cancels without committing, so
-    // accidental drags can be backed out cleanly.
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape' && didMove) {
         ev.preventDefault();
@@ -331,56 +176,6 @@ export function BlockView({
     window.addEventListener('mouseup', onUp);
     window.addEventListener('keydown', onKey);
   };
-
-  const badges = computeBadges(block);
-
-  const isRunning = status === 'running';
-  const isError = status === 'error';
-  const isOk = status === 'ok';
-  const isSkipped = status === 'skipped';
-  const isCancelled = status === 'cancelled';
-  const isFaded = isSkipped || isCancelled;
-
-  // Execution state trumps selection/hover when it comes to coloring the
-  // frame, since it's the most important signal while the scenario is
-  // running.
-  const borderColor = isError
-    ? '#ef4444'
-    : isRunning
-      ? meta.color
-      : selected
-        ? meta.color
-        : isOk
-          ? `${meta.color}44`
-          : isFaded
-            ? '#94a3b855'
-            : `${meta.color}${hov ? 'cc' : '66'}`;
-
-  const background = isError
-    ? '#ef44441f'
-    : isRunning
-      ? `${meta.color}44`
-      : isOk
-        ? `${meta.color}10`
-        : isFaded
-          ? 'transparent'
-          : hov
-            ? `${meta.color}28`
-            : `${meta.color}18`;
-
-  const shadow = isError
-    ? '0 0 18px #ef444488'
-    : isRunning
-      ? `0 0 18px ${meta.color}aa`
-      : selected
-        ? `0 0 0 1px ${meta.color}88`
-        : 'none';
-
-  const zIndex = isRunning || isError
-    ? 5
-    : selected
-      ? 4
-      : 2;
 
   return (
     <>
@@ -395,7 +190,7 @@ export function BlockView({
           opacity: dragging ? 0.35 : isFaded ? 0.5 : 1,
           background,
           border: `${isError || isRunning ? 2 : 1.5}px ${
-            isSkipped || isCancelled ? 'dashed' : 'solid'
+            isFaded ? 'dashed' : 'solid'
           } ${borderColor}`,
           boxShadow: shadow,
           zIndex,
@@ -415,9 +210,9 @@ export function BlockView({
         <div className="flex h-full flex-col justify-center gap-0.5 pr-1">
           <div
             className="font-mono text-[8px] font-bold tracking-wider"
-            style={{ color: meta.color }}
+            style={{ color: accentColor }}
           >
-            {meta.icon} {meta.label.toUpperCase()}
+            ▶ TASK
           </div>
           <div
             className="truncate font-mono text-[11px]"
@@ -426,20 +221,27 @@ export function BlockView({
                 ? 'var(--fl-text-ghost)'
                 : isError
                   ? '#ef4444'
-                  : block.type === 'subroutine' && !subRef
-                    ? '#f59e0b'
-                    : isOk
-                      ? 'var(--fl-text-faint)'
-                      : 'var(--fl-text-muted)',
+                  : isOk
+                    ? 'var(--fl-text-faint)'
+                    : 'var(--fl-text-muted)',
             }}
-            title={displayLabel}
+            title={block.label}
           >
-            {displayLabel}
+            {block.label}
           </div>
         </div>
 
-        {/* Execution status indicator — top-right corner, hidden on hover
-            so the delete button stays usable. */}
+        {/* Step count badge */}
+        {!hov && block.steps.length > 0 && !isRunning && !isOk && !isError && !isFaded && (
+          <span
+            className="pointer-events-none absolute right-1 bottom-1 font-mono text-[8px] font-bold"
+            style={{ color: `${accentColor}88` }}
+          >
+            {block.steps.length}s
+          </span>
+        )}
+
+        {/* Execution status indicator */}
         {!hov && (isRunning || isOk || isError || isSkipped) && (
           <span
             className="pointer-events-none absolute right-1 top-1 flex h-3 items-center justify-center rounded px-1 font-mono text-[8px] font-bold leading-none"
@@ -447,51 +249,15 @@ export function BlockView({
               background: isError
                 ? '#ef4444'
                 : isRunning
-                  ? meta.color
+                  ? accentColor
                   : isOk
-                    ? `${meta.color}66`
+                    ? `${accentColor}66`
                     : '#94a3b866',
               color: isError || isRunning ? '#fff' : 'var(--fl-text)',
             }}
             title={status}
           >
             {isRunning ? '●' : isOk ? '✓' : isError ? '✕' : '–'}
-          </span>
-        )}
-
-        {badges.length > 0 && (
-          <div className="pointer-events-none absolute left-1 bottom-1 flex gap-0.5">
-            {badges.map((b) => (
-              <span
-                key={b.key}
-                title={b.tooltip}
-                className="pointer-events-auto flex h-3 items-center justify-center rounded px-0.5 font-mono text-[8px] font-bold leading-none"
-                style={{ background: `${b.color}2a`, color: b.color }}
-              >
-                {b.icon}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* TRUE / FALSE pill for branch children (only when the
-            parent is a 2-way branch; switch case labels are shown
-            on the lane header instead). */}
-        {(block.parentBranch === 'then' || block.parentBranch === 'else') && (
-          <span
-            className="pointer-events-none absolute right-1 bottom-1 flex h-3 items-center justify-center rounded px-1 font-mono text-[8px] font-bold leading-none"
-            style={{
-              background:
-                block.parentBranch === 'then' ? '#22c55e2a' : '#ef44442a',
-              color: block.parentBranch === 'then' ? '#22c55e' : '#ef4444',
-            }}
-            title={
-              block.parentBranch === 'then'
-                ? '分岐 TRUE 側'
-                : '分岐 FALSE 側'
-            }
-          >
-            {block.parentBranch === 'then' ? 'TRUE' : 'FALSE'}
           </span>
         )}
 
@@ -519,21 +285,21 @@ export function BlockView({
               top: ghost.top,
               width: BLOCK_W,
               height: ghost.height,
-              background: `${meta.color}33`,
-              border: `2px dashed ${meta.color}`,
-              boxShadow: `0 0 14px ${meta.color}66, inset 0 0 10px ${meta.color}33`,
+              background: `${accentColor}33`,
+              border: `2px dashed ${accentColor}`,
+              boxShadow: `0 0 14px ${accentColor}66, inset 0 0 10px ${accentColor}33`,
               zIndex: 10000,
             }}
           >
             <div
               className="flex h-full flex-col justify-center gap-0.5 px-2"
-              style={{ color: meta.color }}
+              style={{ color: accentColor }}
             >
               <div className="font-mono text-[8px] font-bold tracking-wider">
-                {meta.icon} {meta.label.toUpperCase()}
+                ▶ TASK
               </div>
               <div className="truncate font-mono text-[11px] opacity-80">
-                {displayLabel}
+                {block.label}
               </div>
             </div>
           </div>,

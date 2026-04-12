@@ -1,4 +1,3 @@
-import type { Block } from '../types';
 import type {
   NodeLogFrame,
   NodeManifestEntry,
@@ -6,7 +5,7 @@ import type {
   RunNodeRequest,
 } from '../../globals';
 import { MockRuntime } from './runtime';
-import type { NodeContext, Runtime, RuntimeResult } from './runtime';
+import type { NodeCall, NodeContext, Runtime, RuntimeResult } from './runtime';
 
 /**
  * Runtime that dispatches blocks to the FLOWLINE Python worker over
@@ -95,19 +94,15 @@ export class IpcRuntime implements Runtime {
     this.logRoutes.clear();
   }
 
-  async run(block: Block, ctx: NodeContext): Promise<RuntimeResult> {
+  async run(node: NodeCall, ctx: NodeContext): Promise<RuntimeResult> {
     const api = window.flowlineRuntime;
     if (!api) {
       return { ok: false, errorMessage: 'flowlineRuntime not available' };
     }
-    const nodeId = block.nodeId;
+    const nodeId = node.nodeId;
     if (!nodeId) {
-      // Block has no nodeId — delegate to the mock fallback so legacy
-      // scenarios keep animating. The user sees the same mock latency
-      // and FAIL/MISSING label triggers they had before, and the
-      // Inspector's NODE dropdown makes upgrading to a real Python
-      // node a one-click change.
-      return this.mockFallback.run(block, ctx);
+      // Step has no nodeId — delegate to the mock fallback.
+      return this.mockFallback.run(node, ctx);
     }
     const manifest = this.manifestByNodeId.get(nodeId);
     if (!manifest) {
@@ -115,15 +110,12 @@ export class IpcRuntime implements Runtime {
         'warn',
         `ノード id "${nodeId}" がワーカーの manifest に存在しません → Mock で実行`,
       );
-      return this.mockFallback.run(block, ctx);
+      return this.mockFallback.run(node, ctx);
     }
 
-    // Resolve in-port bindings. Each binding is either a `var`
-    // reference (fetched from the executor's variable store) or a
-    // `literal` that's forwarded verbatim. Out-ports aren't sent
-    // — we write them back once the worker returns.
+    // Resolve in-port bindings.
     const ports: Record<string, unknown> = {};
-    const bindings = block.bindings ?? {};
+    const bindings = node.bindings ?? {};
     for (const [portName, def] of Object.entries(manifest.ports)) {
       if (def.kind !== 'in') continue;
       const binding = bindings[portName];
@@ -141,12 +133,12 @@ export class IpcRuntime implements Runtime {
 
     const request: RunNodeRequest = {
       reqId,
-      blockId: block.id,
+      blockId: node.id,
       trackId: ctx.trackId,
       nodeId,
-      params: (block.params as Record<string, unknown>) ?? {},
+      params: node.params ?? {},
       ports,
-      timeout: block.timeout,
+      timeout: node.timeout,
     };
 
     try {
@@ -154,7 +146,7 @@ export class IpcRuntime implements Runtime {
       if (!response.ok) {
         return { ok: false, errorMessage: response.error };
       }
-      return this.applyResult(block, ctx, response.result, manifest);
+      return this.applyResult(node, ctx, response.result, manifest);
     } catch (err) {
       return { ok: false, errorMessage: (err as Error).message ?? String(err) };
     } finally {
@@ -165,21 +157,19 @@ export class IpcRuntime implements Runtime {
   /**
    * Translate a terminal ``result`` frame into ``RuntimeResult`` and
    * write any out-port values back into the variable store through
-   * the block's bindings.
+   * the step's bindings.
    */
   private applyResult(
-    block: Block,
+    node: NodeCall,
     ctx: NodeContext,
     frame: NodeResultFrame,
     manifest: NodeManifestEntry,
   ): RuntimeResult {
     if (frame.ok) {
-      const bindings = block.bindings ?? {};
+      const bindings = node.bindings ?? {};
       for (const [portName, def] of Object.entries(manifest.ports)) {
         if (def.kind !== 'out') continue;
         const binding = bindings[portName];
-        // Literal bindings can't "receive" output — only var
-        // bindings reflect back into the store.
         if (!binding || binding.kind !== 'var') continue;
         if (Object.prototype.hasOwnProperty.call(frame.outputs, portName)) {
           ctx.setVariable(binding.key, frame.outputs[portName]);

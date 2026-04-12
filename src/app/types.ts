@@ -10,14 +10,6 @@
  * Error handling follows a 3-layer model — see docs/02-error-handling.md.
  */
 
-export type BlockType =
-  | 'action'
-  | 'wait'
-  | 'loop'
-  | 'branch'
-  | 'switch'
-  | 'subroutine';
-
 /**
  * Per-block error policy.
  *
@@ -50,66 +42,23 @@ export type PortBinding =
   | { kind: 'var'; key: string }
   | { kind: 'literal'; value: unknown };
 
+/**
+ * A task block on the timeline. Blocks are pure containers: execution
+ * logic lives inside ``steps``, which form a vertical flowchart.
+ * Control flow (loop / branch / switch) is expressed as Step types
+ * inside the flowchart rather than as block-level attributes.
+ */
 export interface Block {
   id: string;
-  type: BlockType;
   label: string;
-  /**
-   * Fully-qualified node id, e.g. ``desktop/click``. When set, the
-   * engine dispatches this block to the Python worker via
-   * ``IpcRuntime``; when unset, the block falls back to ``MockRuntime``
-   * so legacy scenarios animate without touching Python.
-   */
-  nodeId?: string;
   /** Visual slot on the track (0-indexed). Unique per track. */
   slot: number;
-  /** Free-form node parameters. Overrides node decorator defaults. */
-  params?: Record<string, unknown>;
-  /**
-   * Port bindings. Key is the node's port name as declared on its
-   * Python ``@node(ports=...)`` decorator; value is either a
-   * scenario-variable reference or a hardcoded literal. In-ports
-   * are resolved before ``run_node`` on the engine side; out-ports
-   * reflect back into the variable store after the worker result
-   * (only ``var`` bindings are written back). See docs/03-nodes.md
-   * (rev2).
-   */
-  bindings?: Record<string, PortBinding>;
-  /** Max runtime in seconds. Undefined = engine default. */
-  timeout?: number;
-  /** If true, a missing target is not an error — silently skip. */
-  skipIfMissing?: boolean;
-  /** Error handling policy. Undefined = abort. */
-  onError?: OnError;
-  /** For `type: 'subroutine'` blocks, the id of the subroutine to call. */
-  subroutineId?: string;
-  /**
-   * Id of the container block (loop / branch) this block is nested
-   * inside. When set, the renderer wraps the container and its
-   * children in a coloured frame so the scope is visually obvious,
-   * and the engine executes the children inside the container's
-   * control flow (loop body, branch `then`/`else`).
-   *
-   * Children must live on the same track as their parent. Nested
-   * containers are supported — a container may itself live inside
-   * another container, as long as the parent chain has no cycles.
-   */
-  parentBlockId?: string;
-  /**
-   * Which case of the parent container this block belongs to.
-   *
-   * - Branch parent  → ``"then"`` / ``"else"``
-   * - Switch parent  → one of the strings listed in
-   *                    ``parent.params.cases`` (including the
-   *                    conventional ``"default"`` fallback).
-   * - Loop parent    → ignored (single body).
-   *
-   * A fresh drop into a multi-case container picks the first case
-   * as the default; the user can flip it via the Inspector.
-   */
-  parentBranch?: string;
-  /** Internal flowchart. Empty = legacy mode (use type/parentBlockId). */
+  /** Internal flowchart steps, executed top-to-bottom by order. */
   steps: Step[];
+  /** Max runtime in seconds for the whole task. Undefined = no limit. */
+  timeout?: number;
+  /** Error handling policy for the whole task. Undefined = abort. */
+  onError?: OnError;
 }
 
 export interface Track {
@@ -151,18 +100,6 @@ export interface Scenario {
   errorHandler: Track;
   subroutines: Subroutine[];
 }
-
-export const BLOCK_META: Record<
-  BlockType,
-  { color: string; icon: string; label: string }
-> = {
-  action: { color: '#3B82F6', icon: '▶', label: 'アクション' },
-  wait: { color: '#06B6D4', icon: '⏸', label: '待機' },
-  loop: { color: '#8B5CF6', icon: '↻', label: 'ループ' },
-  branch: { color: '#F59E0B', icon: '⑂', label: '分岐' },
-  switch: { color: '#EC4899', icon: '⧉', label: 'スイッチ' },
-  subroutine: { color: '#94A3B8', icon: '⎔', label: 'サブルーチン' },
-};
 
 /** Fixed id used for the scenario's error handler track. */
 export const ERROR_HANDLER_ID = 'error-handler';

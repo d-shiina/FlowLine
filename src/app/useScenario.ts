@@ -7,36 +7,21 @@ let _uid = 1000;
 export const uid = (prefix = 'id') => `${prefix}-${++_uid}`;
 
 /**
- * Compose a lane key from a block's container + case labels. Blocks
- * in the same key share a slot axis, so dragging one into another's
- * column should push it rightward. Blocks in different lanes (e.g.
- * a branch's TRUE and FALSE children) can happily share columns.
- */
-function laneKey(b: Block): string {
-  return `${b.parentBlockId ?? ''}:${b.parentBranch ?? ''}`;
-}
-
-/**
  * Recursively shift occupants at `slot` to `slot + 1` so the slot
  * becomes free. Handles chain collisions (a block at N+1 gets pushed
  * to N+2, etc.). When moving a block, pass its id as `excludeId` to
  * avoid "colliding with itself" at its current slot.
- *
- * Lane-aware: only blocks that share the target block's lane key are
- * pushed. A branch's TRUE child at slot 4 is NOT displaced when the
- * FALSE child moves to slot 4 — the two lanes are independent axes.
  */
 function makeRoomAt(
   blocks: Block[],
   slot: number,
   excludeId: string | undefined,
-  lane: string,
 ): Block[] {
   const occupant = blocks.find(
-    (b) => b.slot === slot && b.id !== excludeId && laneKey(b) === lane,
+    (b) => b.slot === slot && b.id !== excludeId,
   );
   if (!occupant) return blocks;
-  const withRoom = makeRoomAt(blocks, slot + 1, excludeId, lane);
+  const withRoom = makeRoomAt(blocks, slot + 1, excludeId);
   return withRoom.map((b) =>
     b.id === occupant.id ? { ...b, slot: slot + 1 } : b,
   );
@@ -125,11 +110,6 @@ export interface ScenarioStore {
     patch: Partial<Block>,
   ) => void;
   deleteBlock: (trackId: string, blockId: string) => void;
-  moveBlockTree: (
-    trackId: string,
-    rootBlockId: string,
-    delta: number,
-  ) => void;
 
   addSync: (sp: SyncPoint) => void;
   deleteSync: (id: string) => void;
@@ -294,14 +274,8 @@ export function useScenario(): ScenarioStore {
     (containerId: string, block: Block) => {
       commit((s) =>
         mapContainerBlocks(s, containerId, (blocks) => {
-          const withRoom = makeRoomAt(
-            blocks,
-            block.slot,
-            undefined,
-            laneKey(block),
-          );
-          const blockWithSteps = block.steps ? block : { ...block, steps: [] };
-          return [...withRoom, blockWithSteps];
+          const withRoom = makeRoomAt(blocks, block.slot, undefined);
+          return [...withRoom, block];
         }),
       );
     },
@@ -315,17 +289,11 @@ export function useScenario(): ScenarioStore {
           const current = blocks.find((b) => b.id === blockId);
           if (!current) return blocks;
           const merged = { ...current, ...patch };
-          // Trigger collision handling when the target slot, parent,
-          // or lane changes — any of those can land the block on a
-          // new cell that already has an occupant.
+          // Trigger collision handling when the slot changes.
           const needsRoom =
-            (patch.slot !== undefined && patch.slot !== current.slot) ||
-            (patch.parentBlockId !== undefined &&
-              patch.parentBlockId !== current.parentBlockId) ||
-            (patch.parentBranch !== undefined &&
-              patch.parentBranch !== current.parentBranch);
+            patch.slot !== undefined && patch.slot !== current.slot;
           const base = needsRoom
-            ? makeRoomAt(blocks, merged.slot, blockId, laneKey(merged))
+            ? makeRoomAt(blocks, merged.slot, blockId)
             : blocks;
           return base.map((b) => (b.id === blockId ? merged : b));
         }),
@@ -334,78 +302,13 @@ export function useScenario(): ScenarioStore {
     [commit],
   );
 
-  /**
-   * Shift a container block and every descendant it owns by the
-   * given slot delta. Used by the draggable container frame
-   * header: dragging the loop's header left by 2 slots carries
-   * the entire loop body along so the user doesn't have to
-   * reposition every child block one by one.
-   *
-   * Walks the parent chain in-container to collect the descendant
-   * set, then applies the delta uniformly. Negative deltas clamp
-   * against slot 0 so children can't be pushed off the canvas.
-   */
-  const moveBlockTree = useCallback(
-    (containerId: string, rootId: string, delta: number) => {
-      if (delta === 0) return;
-      commit((s) =>
-        mapContainerBlocks(s, containerId, (blocks) => {
-          // BFS: start from the root block, pull in anything whose
-          // parentBlockId points at a member until no new members
-          // are discovered.
-          const toMove = new Set<string>([rootId]);
-          for (;;) {
-            let grew = false;
-            for (const b of blocks) {
-              if (
-                b.parentBlockId &&
-                toMove.has(b.parentBlockId) &&
-                !toMove.has(b.id)
-              ) {
-                toMove.add(b.id);
-                grew = true;
-              }
-            }
-            if (!grew) break;
-          }
-          // Clamp the minimum landing slot so the cluster can't
-          // fall off the left edge. We find the smallest slot
-          // among the moved set and adjust delta accordingly.
-          let minSlot = Number.POSITIVE_INFINITY;
-          for (const b of blocks) {
-            if (toMove.has(b.id)) minSlot = Math.min(minSlot, b.slot);
-          }
-          const effectiveDelta =
-            minSlot + delta < 0 ? -minSlot : delta;
-          if (effectiveDelta === 0) return blocks;
-          return blocks.map((b) =>
-            toMove.has(b.id) ? { ...b, slot: b.slot + effectiveDelta } : b,
-          );
-        }),
-      );
-    },
-    [commit],
-  );
-
   const deleteBlock = useCallback(
     (containerId: string, blockId: string) => {
-      commit((s) => {
-        // Orphan any blocks that were nested inside this one so the
-        // container frame disappears but the child blocks stay put.
-        // Done before the removal so the same container mapper pass
-        // handles both.
-        const orphaned = mapContainerBlocks(s, containerId, (blocks) =>
-          blocks.map((b) =>
-            b.parentBlockId === blockId
-              ? { ...b, parentBlockId: undefined }
-              : b,
-          ),
-        );
-        const removed = mapContainerBlocks(orphaned, containerId, (blocks) =>
+      commit((s) =>
+        mapContainerBlocks(s, containerId, (blocks) =>
           blocks.filter((b) => b.id !== blockId),
-        );
-        return removed;
-      });
+        ),
+      );
     },
     [commit],
   );
@@ -454,24 +357,10 @@ export function useScenario(): ScenarioStore {
 
   const deleteSubroutine = useCallback(
     (id: string) => {
-      commit((s) => {
-        // Cascade: clear `subroutineId` on any block that referenced this
-        // subroutine, across regular tracks and the error handler.
-        const clearRef = (b: Block): Block =>
-          b.subroutineId === id ? { ...b, subroutineId: undefined } : b;
-        return {
-          ...s,
-          subroutines: s.subroutines.filter((sub) => sub.id !== id),
-          tracks: s.tracks.map((t) => ({
-            ...t,
-            blocks: t.blocks.map(clearRef),
-          })),
-          errorHandler: {
-            ...s.errorHandler,
-            blocks: s.errorHandler.blocks.map(clearRef),
-          },
-        };
-      });
+      commit((s) => ({
+        ...s,
+        subroutines: s.subroutines.filter((sub) => sub.id !== id),
+      }));
     },
     [commit],
   );
@@ -493,7 +382,6 @@ export function useScenario(): ScenarioStore {
     addBlock,
     updateBlock,
     deleteBlock,
-    moveBlockTree,
     addSync,
     deleteSync,
     addSubroutine,

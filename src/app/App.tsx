@@ -143,8 +143,6 @@ export default function App() {
     trackName: string;
     trackColor: string;
     slot: number;
-    /** Set when the click landed inside a loop/branch frame. */
-    parentBlockId?: string;
   } | null>(null);
   const [syncModal, setSyncModal] = useState<{ slot: number } | null>(null);
 
@@ -171,57 +169,7 @@ export default function App() {
 
   const isErrorHandlerSelection = selected?.trackId === ERROR_HANDLER_ID;
 
-  // Resolve the selected block's parent container (if any) so the
-  // Inspector can render a case-lane picker. The parent link
-  // itself is managed via drag-and-drop onto container frames —
-  // there's no Inspector dropdown for attaching a container
-  // anymore, which keeps the primary interaction loop in the
-  // timeline where it belongs.
-  const parentContainerInfo = useMemo<{
-    cases: string[] | null;
-    type: 'loop' | 'branch' | 'switch' | null;
-  }>(() => {
-    if (!selectedBlock || !selectedBlock.parentBlockId || !selected) {
-      return { cases: null, type: null };
-    }
-    const blocks: Block[] | null =
-      selected.trackId === ERROR_HANDLER_ID
-        ? scenario.errorHandler.blocks
-        : (scenario.tracks.find((x) => x.id === selected.trackId)?.blocks ??
-          scenario.subroutines.find((s) => s.id === selected.trackId)
-            ?.blocks ??
-          null);
-    const parent = blocks?.find(
-      (b) => b.id === selectedBlock.parentBlockId,
-    );
-    if (
-      !parent ||
-      (parent.type !== 'loop' &&
-        parent.type !== 'branch' &&
-        parent.type !== 'switch')
-    ) {
-      return { cases: null, type: null };
-    }
-    const cases: string[] =
-      parent.type === 'branch'
-        ? ['then', 'else']
-        : parent.type === 'switch'
-          ? Array.isArray(
-              (parent.params as Record<string, unknown> | undefined)?.cases,
-            )
-            ? (parent.params as { cases: unknown[] }).cases.map((c) =>
-                String(c),
-              )
-            : []
-          : [];
-    return { cases, type: parent.type };
-  }, [selectedBlock, selected, scenario]);
-
-  const handleCanvasClick = (
-    trackId: string,
-    slot: number,
-    parent?: { blockId: string; branch?: 'then' | 'else' },
-  ) => {
+  const handleCanvasClick = (trackId: string, slot: number) => {
     // The error handler track ignores sync mode — sync points don't apply.
     if (trackId === ERROR_HANDLER_ID) {
       setAddModal({
@@ -229,7 +177,6 @@ export default function App() {
         trackName: 'エラー処理',
         trackColor: '#f43f5e',
         slot,
-        parentBlockId: parent?.blockId,
       });
       return;
     }
@@ -240,7 +187,6 @@ export default function App() {
         trackName: subroutineTrack.name,
         trackColor: subroutineTrack.color,
         slot,
-        parentBlockId: parent?.blockId,
       });
       return;
     }
@@ -254,7 +200,6 @@ export default function App() {
         trackName: t.name,
         trackColor: t.color,
         slot,
-        parentBlockId: parent?.blockId,
       });
     }
   };
@@ -649,7 +594,6 @@ export default function App() {
                     currentSlot={currentSlotByTrack[track.id]}
                     selectedBlockId={selected?.blockId ?? null}
                     blocksDraggable={mode === 'block'}
-                    subroutines={scenario.subroutines}
                     onRename={store.renameTrack}
                     onDelete={store.deleteTrack}
                     onUpdateBlock={store.updateBlock}
@@ -659,7 +603,6 @@ export default function App() {
                     }}
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
-                    onMoveContainerTree={store.moveBlockTree}
                     onDoubleClickBlock={(tid, bid) =>
                       setEditingBlock({ trackId: tid, blockId: bid })
                     }
@@ -708,7 +651,6 @@ export default function App() {
                   selectedBlockId={selected?.blockId ?? null}
                   blocksDraggable={mode === 'block'}
                   variant="error"
-                  subroutines={scenario.subroutines}
                   onRename={store.renameTrack}
                   onDelete={store.deleteTrack}
                   onUpdateBlock={store.updateBlock}
@@ -718,7 +660,6 @@ export default function App() {
                   }}
                   onSelectBlock={handleBlockClick}
                   onCanvasClick={handleCanvasClick}
-                  onMoveContainerTree={store.moveBlockTree}
                   onDoubleClickBlock={() => {/* error handler blocks don't open flowchart editor */}}
                 />
 
@@ -751,11 +692,9 @@ export default function App() {
                     track={subroutineTrack}
                     totalSlots={totalSlots}
                     blockStatus={blockStatus}
-
                     currentSlot={currentSlotByTrack[subroutineTrack.id]}
                     selectedBlockId={selected?.blockId ?? null}
                     blocksDraggable={mode === 'block'}
-                    subroutines={scenario.subroutines}
                     onRename={(id, name) => store.renameSubroutine(id, name)}
                     onDelete={() => {
                       /* subroutine sidebar handles delete */
@@ -767,7 +706,6 @@ export default function App() {
                     }}
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
-                    onMoveContainerTree={store.moveBlockTree}
                     onDoubleClickBlock={() => {/* subroutine blocks don't open flowchart editor in this phase */}}
                   />
                 </>
@@ -789,11 +727,6 @@ export default function App() {
           block={selectedBlock}
           trackId={selected?.trackId ?? null}
           isErrorHandler={isErrorHandlerSelection}
-          nodeManifest={nodeManifest}
-          scenarioVariables={scenario.variables.scenario}
-          parentContainerCases={parentContainerInfo.cases}
-          parentContainerType={parentContainerInfo.type}
-          onCreateVariable={store.setVariable}
           onChange={store.updateBlock}
           onClose={() => setSelected(null)}
         />
@@ -815,14 +748,8 @@ export default function App() {
           trackName={addModal.trackName}
           trackColor={addModal.trackColor}
           slot={addModal.slot}
-          subroutines={scenario.subroutines}
           onAdd={(block) => {
-            // Preserve the pre-click container hit so blocks added
-            // inside a loop/branch frame land already nested.
-            const nested: Block = addModal.parentBlockId
-              ? { ...block, parentBlockId: addModal.parentBlockId }
-              : block;
-            store.addBlock(addModal.trackId, nested);
+            store.addBlock(addModal.trackId, block);
           }}
         />
       )}

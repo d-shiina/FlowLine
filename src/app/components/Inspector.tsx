@@ -1,24 +1,11 @@
-import type { Block, OnError, PortBinding } from '../types';
-import { BLOCK_META } from '../types';
-import type { NodeManifestEntry } from '../../globals';
+import type { Block, OnError } from '../types';
 import { Select, type SelectOption } from './ui/Select';
 import { Checkbox } from './ui/Checkbox';
-import {
-  LoopParamsSection,
-  BranchParamsSection,
-  SwitchParamsSection,
-} from './inspector/ControlFlowSections';
-import { NodePortsSection, NodeParamsSection } from './inspector/NodeSection';
 
 interface Props {
   block: Block | null;
   trackId: string | null;
   isErrorHandler: boolean;
-  nodeManifest: NodeManifestEntry[];
-  scenarioVariables: Record<string, unknown>;
-  parentContainerCases: string[] | null;
-  parentContainerType: 'loop' | 'branch' | 'switch' | null;
-  onCreateVariable: (key: string, value: unknown) => void;
   onChange: (trackId: string, blockId: string, patch: Partial<Block>) => void;
   onClose: () => void;
 }
@@ -43,22 +30,13 @@ function fromKey(k: OnErrorKey, current: OnError | undefined): OnError {
 
 /**
  * Right-side properties inspector for the selected block.
- *
- * This file is the thin facade — per-block-type sub-editors live in
- * ``inspector/ControlFlowSections.tsx`` (loop / branch / switch
- * params) and ``inspector/NodeSection.tsx`` (Python node ports +
- * params). The facade owns shared concerns: label / slot / lane
- * picker / error-handling / timeout.
+ * Covers block-level concerns: label, slot, timeout, and error handling.
+ * Step-level node/port/param configuration lives in the FlowchartEditor.
  */
 export function Inspector({
   block,
   trackId,
   isErrorHandler,
-  nodeManifest,
-  scenarioVariables,
-  parentContainerCases,
-  parentContainerType,
-  onCreateVariable,
   onChange,
   onClose,
 }: Props) {
@@ -71,63 +49,9 @@ export function Inspector({
       </aside>
     );
   }
-  const meta = BLOCK_META[block.type];
+
   const onErrorKey = toKey(block.onError);
   const hasTimeout = block.timeout !== undefined;
-
-  const selectedNode = block.nodeId
-    ? (nodeManifest.find((n) => n.id === block.nodeId) ?? null)
-    : null;
-  const nodeOptions: SelectOption<string>[] = [
-    { value: '', label: '(未設定 / Mock で実行)' },
-    ...nodeManifest.map((n) => ({
-      value: n.id,
-      label: `${n.category}/${n.label}`,
-    })),
-  ];
-
-  const handleSelectNode = (nodeId: string): void => {
-    if (nodeId === '') {
-      onChange(trackId, block.id, {
-        nodeId: undefined,
-        bindings: undefined,
-        params: undefined,
-      });
-      return;
-    }
-    onChange(trackId, block.id, {
-      nodeId,
-      bindings: undefined,
-      params: undefined,
-    });
-  };
-
-  const handleBindingChange = (
-    portName: string,
-    binding: PortBinding | undefined,
-  ): void => {
-    const next: Record<string, PortBinding> = { ...(block.bindings ?? {}) };
-    if (binding === undefined) {
-      delete next[portName];
-    } else {
-      next[portName] = binding;
-    }
-    onChange(trackId, block.id, {
-      bindings: Object.keys(next).length > 0 ? next : undefined,
-    });
-  };
-
-  const handleParamChange = (
-    paramName: string,
-    value: string | number | boolean | undefined,
-  ): void => {
-    const next = { ...(block.params ?? {}) } as Record<string, unknown>;
-    if (value === undefined || value === '') delete next[paramName];
-    else next[paramName] = value;
-    onChange(trackId, block.id, {
-      params: Object.keys(next).length > 0 ? next : undefined,
-    });
-  };
 
   const onErrorOptions: SelectOption<OnErrorKey>[] = [
     ...(isErrorHandler
@@ -150,11 +74,8 @@ export function Inspector({
   return (
     <aside className="fl-scroll flex h-full w-72 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-fl-border bg-fl-panel p-4">
       <div className="flex items-center justify-between">
-        <div
-          className="font-mono text-[10px] font-bold tracking-wider"
-          style={{ color: meta.color }}
-        >
-          {meta.icon} {meta.label.toUpperCase()}
+        <div className="font-mono text-[10px] font-bold tracking-wider text-fl-text-muted">
+          ▶ TASK
           {isErrorHandler && (
             <span className="ml-1 text-[#f43f5e]">/ エラー処理</span>
           )}
@@ -193,116 +114,6 @@ export function Inspector({
           className="rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none"
         />
       </label>
-
-      {parentContainerCases && parentContainerCases.length > 1 && (
-        <div className="flex flex-col gap-1">
-          <span className="font-mono text-[9px] text-fl-text-faint">
-            内包レーン
-          </span>
-          <Select<string>
-            value={block.parentBranch ?? parentContainerCases[0]}
-            onValueChange={(side) =>
-              onChange(trackId, block.id, { parentBranch: side })
-            }
-            options={parentContainerCases.map((c) => ({
-              value: c,
-              label:
-                parentContainerType === 'branch'
-                  ? c === 'then'
-                    ? 'TRUE 側 (条件一致)'
-                    : 'FALSE 側 (条件不一致)'
-                  : c,
-            }))}
-          />
-          <span className="font-mono text-[8px] text-fl-text-ghost">
-            親コンテナをドラッグで変更
-          </span>
-        </div>
-      )}
-
-      {block.type === 'loop' && (
-        <LoopParamsSection
-          block={block}
-          scenarioVariables={scenarioVariables}
-          onChange={(patch) => onChange(trackId, block.id, patch)}
-        />
-      )}
-
-      {block.type === 'branch' && (
-        <BranchParamsSection
-          block={block}
-          scenarioVariables={scenarioVariables}
-          onChange={(patch) => onChange(trackId, block.id, patch)}
-        />
-      )}
-
-      {block.type === 'switch' && (
-        <SwitchParamsSection
-          block={block}
-          scenarioVariables={scenarioVariables}
-          onChange={(patch) => onChange(trackId, block.id, patch)}
-        />
-      )}
-
-      {block.type === 'action' && (
-        <div className="flex flex-col gap-1">
-          <span className="font-mono text-[9px] text-fl-text-faint">NODE</span>
-          <Select<string>
-            value={block.nodeId ?? ''}
-            onValueChange={handleSelectNode}
-            options={nodeOptions}
-          />
-          {nodeManifest.length === 0 && (
-            <span className="font-mono text-[9px] text-fl-text-ghost">
-              Python ランタイム未接続 — Mock で実行されます
-            </span>
-          )}
-          {selectedNode && (
-            <span
-              className="font-mono text-[9px] text-fl-text-dim"
-              title={selectedNode.id}
-            >
-              {selectedNode.id} · v{selectedNode.version}
-            </span>
-          )}
-        </div>
-      )}
-
-      {block.type === 'action' && selectedNode && (
-        <NodePortsSection
-          node={selectedNode}
-          bindings={block.bindings ?? {}}
-          scenarioVariables={scenarioVariables}
-          onBindingChange={handleBindingChange}
-          onCreateVariable={onCreateVariable}
-        />
-      )}
-
-      {block.type === 'action' && selectedNode && (
-        <NodeParamsSection
-          node={selectedNode}
-          params={(block.params as Record<string, unknown>) ?? {}}
-          onParamChange={handleParamChange}
-        />
-      )}
-
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2 font-mono text-[10px] text-fl-text-muted">
-          <Checkbox
-            checked={!!block.skipIfMissing}
-            onCheckedChange={(v) =>
-              onChange(trackId, block.id, {
-                skipIfMissing: v || undefined,
-              })
-            }
-            accent="#eab308"
-          />
-          ターゲットが見つからなくてもOK
-        </div>
-        <span className="pl-5 font-mono text-[9px] text-fl-text-ghost">
-          （想定内の不在は静かにスキップ）
-        </span>
-      </div>
 
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between font-mono text-[9px] text-fl-text-faint">
