@@ -426,10 +426,11 @@ export default function App() {
   // which runs separately on abort. Track heights are dynamic now
   // (switches/branches grow their row), so we sum the per-track
   // computed heights instead of the old TRACK_H constant.
-  const regularTrackHeight = useMemo(
-    () => computeTracksLayout(scenario.tracks).totalHeight,
+  const tracksLayout = useMemo(
+    () => computeTracksLayout(scenario.tracks),
     [scenario.tracks],
   );
+  const regularTrackHeight = tracksLayout.totalHeight;
 
   const phaseLabel =
     execution.state.phase === 'running'
@@ -678,6 +679,8 @@ export default function App() {
                     <div key={sp.id} className="pointer-events-auto">
                       <SyncLine
                         sp={sp}
+                        trackHeights={tracksLayout.perTrack.map(t => t.trackHeight)}
+                        trackTops={tracksLayout.trackTops}
                         totalHeight={regularTrackHeight}
                         onDelete={store.deleteSync}
                       />
