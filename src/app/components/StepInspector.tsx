@@ -181,9 +181,27 @@ export function StepInspector({
           <SLabel>NODE</SLabel>
           <Autocomplete
             value={step.nodeId ?? ''}
-            onValueChange={(nodeId) =>
-              onUpdateStep(step.id, { nodeId: nodeId || undefined })
-            }
+            onValueChange={(nodeId) => {
+              const patch: Partial<Step> = { nodeId: nodeId || undefined };
+              // Auto-bind out-ports to scenario variables on node selection.
+              if (nodeId) {
+                const node = nodeManifest.find((n) => n.id === nodeId);
+                if (node) {
+                  const newBindings = { ...(step.bindings ?? {}) };
+                  for (const [portName, def] of Object.entries(node.ports)) {
+                    if (def.kind !== 'out') continue;
+                    if (!newBindings[portName]) {
+                      newBindings[portName] = {
+                        kind: 'var',
+                        key: `scenario.${portName}`,
+                      };
+                    }
+                  }
+                  patch.bindings = newBindings;
+                }
+              }
+              onUpdateStep(step.id, patch);
+            }}
             options={nodeOptions}
             placeholder="ノードを検索..."
             allowClear
