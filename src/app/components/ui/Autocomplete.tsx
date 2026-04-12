@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Autocomplete as BaseAC } from '@base-ui/react/autocomplete';
 
 export interface AutocompleteOption {
@@ -10,7 +10,9 @@ export interface AutocompleteOption {
 }
 
 interface Props {
+  /** Currently selected option value (e.g. a node id). */
   value: string;
+  /** Called when the user selects an item or clears the field. */
   onValueChange: (value: string) => void;
   options: AutocompleteOption[];
   placeholder?: string;
@@ -18,10 +20,10 @@ interface Props {
   allowClear?: boolean;
 }
 
-/** Group options by their `group` field, preserving insertion order. */
-function groupBy(
+/** Group options by `group`, preserving insertion order. */
+function buildGroups(
   opts: AutocompleteOption[],
-): Array<[string, AutocompleteOption[]]> {
+): Array<{ label: string; items: AutocompleteOption[] }> {
   const map = new Map<string, AutocompleteOption[]>();
   for (const o of opts) {
     const g = o.group ?? '';
@@ -29,17 +31,20 @@ function groupBy(
     if (arr) arr.push(o);
     else map.set(g, [o]);
   }
-  return Array.from(map.entries());
+  return Array.from(map.entries()).map(([label, items]) => ({ label, items }));
 }
 
 /**
- * Thin wrapper around Base UI's Autocomplete primitive, styled to match the
- * FLOWLINE dark theme. Options are grouped by the `group` field and rendered
- * with an optional `description` alongside the label.
+ * Thin wrapper around Base UI's Autocomplete primitive, styled to match
+ * the FLOWLINE dark theme.
  *
- * `value` / `onValueChange` operate on option **values** (e.g. node IDs).
- * The parent is only notified when the user selects a valid option or clears
- * the field — not on every keystroke.
+ * Items are `{ value, label }` objects — Base UI auto-detects the shape
+ * and uses `label` for display and filtering. A custom `filter` is added
+ * so users can search by both label AND value (e.g. "desktop/click").
+ *
+ * `value` / `onValueChange` operate on option **values** (node IDs, etc.).
+ * The parent is notified only on `item-press` (selection) or `clear-press`,
+ * not on every keystroke.
  */
 export function Autocomplete({
   value,
@@ -48,29 +53,72 @@ export function Autocomplete({
   placeholder = '(検索)',
   allowClear = false,
 }: Props) {
-  // inputText is what the user sees in the input. Starts as the current value
-  // (e.g. "desktop/click"); updated as the user types or selects.
-  const [inputText, setInputText] = useState(value);
+  // Display text in the input. Shows the selected option's label (or the
+  // raw value if no matching option exists, e.g. on first render).
+  const resolveLabel = useCallback(
+    (v: string) => {
+      if (!v) return '';
+      const opt = options.find((o) => o.value === v);
+      return opt?.label ?? v;
+    },
+    [options],
+  );
 
-  // Keep the displayed text in sync when the selected value changes from
-  // outside (e.g. switching between steps).
+  const [inputText, setInputText] = useState(() => resolveLabel(value));
+
+  // Track the last highlighted item so we can read the *object* value
+  // when `item-press` fires (onValueChange only gives the display text).
+  const highlightedRef = useRef<AutocompleteOption | null>(null);
+
+  // Sync when the parent changes the selected value (step switching, etc.).
   useEffect(() => {
-    setInputText(value);
-  }, [value]);
+    setInputText(resolveLabel(value));
+  }, [value, resolveLabel]);
 
-  const grouped = useMemo(() => groupBy(options), [options]);
+  const groups = useMemo(() => buildGroups(options), [options]);
+
+  // Custom filter: match against both label and value (node id).
+  const filter = useCallback(
+    (item: AutocompleteOption, query: string) => {
+      const q = query.toLowerCase();
+      return (
+        item.label.toLowerCase().includes(q) ||
+        item.value.toLowerCase().includes(q)
+      );
+    },
+    [],
+  );
 
   return (
     <BaseAC.Root
-      items={options.map((o) => o.value)}
+      items={options}
       value={inputText}
-      onValueChange={(v) => {
-        setInputText(v);
-        // Only propagate to parent when an exact option is selected or cleared.
-        if (v === '' || options.some((o) => o.value === v)) {
-          onValueChange(v);
+      onValueChange={(text, details) => {
+        setInputText(text);
+
+        if (details.reason === 'item-press') {
+          // User clicked / pressed Enter on an item — propagate its value.
+          const item = highlightedRef.current;
+          if (item) {
+            onValueChange(item.value);
+          } else {
+            // Fallback: match by label text
+            const match = options.find((o) => o.label === text);
+            if (match) onValueChange(match.value);
+          }
+        } else if (
+          details.reason === 'clear-press' ||
+          details.reason === 'input-clear'
+        ) {
+          onValueChange('');
         }
       }}
+      onItemHighlighted={(itemValue) => {
+        highlightedRef.current =
+          (itemValue as AutocompleteOption) ?? null;
+      }}
+      filter={filter}
+      openOnInputClick
     >
       <BaseAC.InputGroup className="flex items-center overflow-hidden rounded-md border border-fl-border-strong bg-fl-panel-2 transition-colors focus-within:border-fl-accent">
         <BaseAC.Input
@@ -91,17 +139,17 @@ export function Autocomplete({
         <BaseAC.Positioner sideOffset={4} className="z-[250] outline-none">
           <BaseAC.Popup className="max-h-[280px] min-w-[var(--anchor-width)] overflow-y-auto rounded-md border border-fl-border-strong bg-fl-modal py-1 font-mono text-[11px] shadow-2xl outline-none">
             <BaseAC.List>
-              {grouped.map(([groupName, items]) => (
-                <BaseAC.Group key={groupName || '__default__'}>
-                  {groupName && (
+              {groups.map((g) => (
+                <BaseAC.Group key={g.label || '__default__'}>
+                  {g.label && (
                     <BaseAC.GroupLabel className="sticky top-0 bg-fl-modal px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-fl-text-ghost">
-                      {groupName}
+                      {g.label}
                     </BaseAC.GroupLabel>
                   )}
-                  {items.map((opt) => (
+                  {g.items.map((opt) => (
                     <BaseAC.Item
                       key={opt.value}
-                      value={opt.value}
+                      value={opt}
                       className="flex cursor-pointer items-center justify-between gap-2 px-2 py-1.5 text-fl-text-muted outline-none data-[highlighted]:bg-[#3b82f620] data-[selected]:text-fl-accent"
                     >
                       <span>{opt.label}</span>

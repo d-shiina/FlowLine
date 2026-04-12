@@ -74,7 +74,7 @@ export function FlowchartEditor({
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* Breadcrumb */}
       <div className="flex-shrink-0 border-b border-fl-border bg-fl-panel">
         <Breadcrumb
