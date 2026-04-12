@@ -5,8 +5,13 @@ a session with a user-specified name (e.g. "main", "sub"). Subsequent
 nodes specify which session to operate on via the ``browser`` port.
 
 Playwright's sync_api is greenlet-based and must run on the thread
-where it was started. All Playwright calls are dispatched to a
-dedicated long-lived thread via ``run_on_browser(fn)``.
+where it was started. A single dedicated thread runs for the entire
+lifetime of the worker process. All Playwright calls are dispatched
+to it via ``run_on_browser(fn)``.
+
+IMPORTANT: The browser thread is never terminated. Playwright's
+greenlets are pinned to it, so creating a new thread after stopping
+the old one causes "cannot switch to a different thread" crashes.
 """
 
 from __future__ import annotations
@@ -19,7 +24,8 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 T = TypeVar("T")
 
 _browser_thread: Optional[threading.Thread] = None
-_task_queue: Queue[Optional[tuple]] = Queue()
+_task_queue: Queue[tuple] = Queue()
+_thread_lock = threading.Lock()
 
 # Playwright objects — only accessed from the browser thread.
 _pw = None
@@ -27,13 +33,9 @@ _sessions: Dict[str, dict] = {}  # name → {"browser", "context", "page"}
 
 
 def _browser_loop():
-    """Runs on the dedicated browser thread. Processes tasks from the queue."""
+    """Runs on the dedicated browser thread for the entire worker lifetime."""
     while True:
-        item = _task_queue.get()
-        if item is None:
-            _cleanup_all()
-            break
-        fn, future = item
+        fn, future = _task_queue.get()
         try:
             result = fn()
             future.set_result(result)
@@ -57,19 +59,6 @@ def _ensure_pw():
     return _pw
 
 
-def _cleanup_all():
-    """Close all sessions and Playwright. Called on browser thread."""
-    global _pw, _sessions
-    for name in list(_sessions.keys()):
-        _close_session(name)
-    if _pw:
-        try:
-            _pw.stop()
-        except Exception:
-            pass
-        _pw = None
-
-
 def _close_session(name: str):
     """Close a single session by name. Called on browser thread."""
     session = _sessions.pop(name, None)
@@ -87,12 +76,13 @@ def _close_session(name: str):
 def _ensure_thread():
     """Start the browser thread if it hasn't been started yet."""
     global _browser_thread
-    if _browser_thread is not None and _browser_thread.is_alive():
-        return
-    _browser_thread = threading.Thread(
-        target=_browser_loop, daemon=True, name="flowline-browser"
-    )
-    _browser_thread.start()
+    with _thread_lock:
+        if _browser_thread is not None and _browser_thread.is_alive():
+            return
+        _browser_thread = threading.Thread(
+            target=_browser_loop, daemon=True, name="flowline-browser"
+        )
+        _browser_thread.start()
 
 
 def run_on_browser(fn: Callable[[], T]) -> T:
@@ -109,7 +99,6 @@ def open_session(name: str, headless: bool = False):
     Must be called inside ``run_on_browser``.
     Returns the page object.
     """
-    global _sessions
     if name in _sessions:
         return _sessions[name]["page"]
 
@@ -129,7 +118,6 @@ def get_page(name: str = "default"):
     """
     session = _sessions.get(name)
     if not session:
-        # Auto-create session for convenience / backward compatibility.
         return open_session(name, headless=False)
     return session["page"]
 
@@ -139,15 +127,15 @@ def close_session(name: str):
     _close_session(name)
 
 
+def close_all_sessions():
+    """Close all browser sessions (but keep the thread + Playwright alive).
+
+    Must be called inside ``run_on_browser``.
+    """
+    for name in list(_sessions.keys()):
+        _close_session(name)
+
+
 def list_sessions() -> list:
     """Return list of active session names. Must be called inside ``run_on_browser``."""
     return list(_sessions.keys())
-
-
-def close_all():
-    """Close all browser sessions. Safe to call from any thread."""
-    global _browser_thread
-    if _browser_thread is not None and _browser_thread.is_alive():
-        _task_queue.put(None)
-        _browser_thread.join(timeout=10)
-        _browser_thread = None
