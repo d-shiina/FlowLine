@@ -1,413 +1,383 @@
-import { useCallback, useEffect, useMemo } from 'react';
-import {
-  Background,
-  Controls,
-  MiniMap,
-  ReactFlow,
-  ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
-  type Edge,
-  type Node,
-  type NodeChange,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import type { Block, Scenario, Track } from '../types';
+import { Fragment, useMemo } from 'react';
+import { Plus, Trash2, AlertTriangle } from 'lucide-react';
+import type { Block, Scenario } from '../types';
 import type { BlockStatus } from '../engine';
-import {
-  TimelineBlockNode,
-  type TimelineBlockNodeData,
-} from './TimelineBlockNode';
-import { SyncBarrierNode, type SyncBarrierNodeData } from './SyncBarrierNode';
+import { TimelineBlock } from './TimelineBlock';
 
 // ── Layout constants ────────────────────────
-
-const SLOT_PX = 120;
-const TRACK_H = 80;
-const TRACK_GAP = 12;
-const TRACKS_START_Y = 40;
-const ERROR_HANDLER_GAP = 32;
-
-// Node types
-const nodeTypes = {
-  block: TimelineBlockNode,
-  syncBarrier: SyncBarrierNode,
-};
+const SLOT_W = 110;
+const TRACK_H = 72;
+const RULER_H = 32;
+const LEFT_W = 168;
+const ERROR_SEPARATOR_H = 24;
+const ADD_TRACK_H = 28;
+const MIN_SLOTS = 20;
 
 interface Props {
   scenario: Scenario;
   blockStatus: Record<string, BlockStatus>;
   selectedBlockId: string | null;
+  running: boolean;
+  currentSlotByTrack: Record<string, number | undefined>;
   onSelectBlock: (trackId: string, blockId: string) => void;
   onOpenBlock: (trackId: string, blockId: string) => void;
   onUpdateBlock: (trackId: string, blockId: string, patch: Partial<Block>) => void;
   onDeleteBlock: (trackId: string, blockId: string) => void;
-  onDeleteSyncPoint: (syncId: string) => void;
-  running: boolean;
+  onCanvasClick: (trackId: string, slot: number) => void;
+  onAddTrack: () => void;
+  onRenameTrack: (trackId: string, name: string) => void;
+  onDeleteTrack: (trackId: string) => void;
+  onDeleteSyncPoint: (id: string) => void;
 }
 
-type AnyData = TimelineBlockNodeData | SyncBarrierNodeData;
-
-function TimelineInner({
+/**
+ * CSS Grid-based timeline with sticky track headers and ruler.
+ *
+ * Layout:
+ * ┌──────┬─────────────────────┐
+ * │corner│   ruler (sticky-top)│
+ * ├──────┼─────────────────────┤
+ * │track1│   track1 canvas     │
+ * ├──────┼─────────────────────┤
+ * │track2│   track2 canvas     │
+ * ├──────┼─────────────────────┤
+ * │+track│                     │
+ * ├══════╪═════════════════════┤
+ * │⚠err  │   error handler     │
+ * └──────┴─────────────────────┘
+ */
+export function Timeline({
   scenario,
   blockStatus,
   selectedBlockId,
+  currentSlotByTrack,
   onSelectBlock,
   onOpenBlock,
   onUpdateBlock,
   onDeleteBlock,
+  onCanvasClick,
+  onAddTrack,
+  onRenameTrack,
+  onDeleteTrack,
   onDeleteSyncPoint,
 }: Props) {
-  // Compute track layout: trackIndex → y position
-  const trackLayout = useMemo(() => {
-    const layout: Array<{
-      trackId: string;
-      trackName: string;
-      trackColor: string;
-      y: number;
-      height: number;
-      isErrorHandler: boolean;
-    }> = [];
-    let y = TRACKS_START_Y;
+  // Compute total slots
+  const totalSlots = useMemo(() => {
+    let m = MIN_SLOTS;
     for (const t of scenario.tracks) {
-      layout.push({
-        trackId: t.id,
-        trackName: t.name,
-        trackColor: t.color,
-        y,
-        height: TRACK_H,
-        isErrorHandler: false,
-      });
-      y += TRACK_H + TRACK_GAP;
+      for (const b of t.blocks) m = Math.max(m, b.slot + 3);
     }
-    // Error handler after a gap
-    y += ERROR_HANDLER_GAP;
-    layout.push({
-      trackId: scenario.errorHandler.id,
-      trackName: scenario.errorHandler.name,
-      trackColor: scenario.errorHandler.color,
-      y,
-      height: TRACK_H,
-      isErrorHandler: true,
-    });
-    return layout;
-  }, [scenario.tracks, scenario.errorHandler]);
-
-  const trackTopById = useMemo(() => {
-    const m = new Map<string, { y: number; color: string; name: string; isErrorHandler: boolean }>();
-    for (const t of trackLayout) {
-      m.set(t.trackId, {
-        y: t.y,
-        color: t.trackColor,
-        name: t.trackName,
-        isErrorHandler: t.isErrorHandler,
-      });
+    for (const b of scenario.errorHandler.blocks) {
+      m = Math.max(m, b.slot + 3);
+    }
+    for (const sp of scenario.syncPoints) {
+      m = Math.max(m, sp.slot + 2);
     }
     return m;
-  }, [trackLayout]);
+  }, [scenario]);
 
-  // Compute total width based on max slot
-  const totalSlots = useMemo(() => {
-    let max = 12;
-    for (const t of scenario.tracks) {
-      for (const b of t.blocks) max = Math.max(max, b.slot + 2);
-    }
-    for (const b of scenario.errorHandler.blocks) max = Math.max(max, b.slot + 2);
-    return max;
-  }, [scenario.tracks, scenario.errorHandler.blocks]);
-
-  // Build ReactFlow nodes
-  const { rfNodes, rfEdges } = useMemo(() => {
-    const nodes: Node<AnyData>[] = [];
-    const edges: Edge[] = [];
-
-    // Block nodes
-    const renderBlocks = (blocks: Block[], trackId: string) => {
-      const info = trackTopById.get(trackId);
-      if (!info) return;
-      for (const block of blocks) {
-        nodes.push({
-          id: block.id,
-          type: 'block',
-          position: { x: block.slot * SLOT_PX + 18, y: info.y + 12 },
-          data: {
-            block,
-            trackColor: info.color,
-            status: blockStatus[block.id] ?? 'idle',
-            isErrorHandler: info.isErrorHandler,
-            onDoubleClick: (id) => onOpenBlock(trackId, id),
-            onDelete: (id) => onDeleteBlock(trackId, id),
-          } as TimelineBlockNodeData,
-          selected: selectedBlockId === block.id,
-        });
-      }
-    };
-    for (const t of scenario.tracks) renderBlocks(t.blocks, t.id);
-    renderBlocks(scenario.errorHandler.blocks, scenario.errorHandler.id);
-
-    // Sync barrier nodes — span regular tracks only
-    const regularTracksHeight =
-      scenario.tracks.length * (TRACK_H + TRACK_GAP);
-    for (const sp of scenario.syncPoints) {
-      nodes.push({
-        id: sp.id,
-        type: 'syncBarrier',
-        position: {
-          x: sp.slot * SLOT_PX,
-          y: TRACKS_START_Y,
-        },
-        draggable: false,
-        selectable: false,
-        data: {
-          label: sp.label,
-          slot: sp.slot,
-          height: regularTracksHeight,
-          trackStates: scenario.tracks.map((t) => ({
-            trackId: t.id,
-            trackName: t.name,
-            trackColor: t.color,
-            state: 'pending' as const,
-          })),
-          onDelete: () => onDeleteSyncPoint(sp.id),
-        } as SyncBarrierNodeData,
-      });
-    }
-
-    // Edges: block output → block input (when name matches scenario variable key)
-    const allBlocks: Array<[Track | { id: string; blocks: Block[] }, Block]> = [];
-    for (const t of scenario.tracks) {
-      for (const b of t.blocks) allBlocks.push([t as Track, b]);
-    }
-    // Build a map from scenario variable key → emitting block
-    const emittersByKey = new Map<string, string>();
-    for (const [, b] of allBlocks) {
-      if (b.outputs) {
-        for (const key of Object.values(b.outputs)) {
-          emittersByKey.set(key, b.id);
-        }
-      }
-    }
-    // For each block's inputs, if key matches an emitter, draw an edge
-    for (const [, b] of allBlocks) {
-      if (b.inputs) {
-        for (const [, key] of Object.entries(b.inputs)) {
-          const emitterId = emittersByKey.get(key);
-          if (emitterId && emitterId !== b.id) {
-            edges.push({
-              id: `e-${emitterId}-${b.id}`,
-              source: emitterId,
-              target: b.id,
-              animated: true,
-              style: { stroke: '#3b82f6', strokeWidth: 1.5 },
-              label: key,
-              labelStyle: { fontSize: 9, fill: 'var(--fl-text-faint)' },
-              labelBgStyle: { fill: 'var(--fl-panel-2)' },
-            });
-          }
-        }
-      }
-    }
-
-    return { rfNodes: nodes, rfEdges: edges };
-  }, [
-    scenario.tracks,
-    scenario.errorHandler,
-    scenario.syncPoints,
-    blockStatus,
-    selectedBlockId,
-    trackTopById,
-    onOpenBlock,
-    onDeleteBlock,
-    onDeleteSyncPoint,
-  ]);
-
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<AnyData>>(rfNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(rfEdges);
-
-  useEffect(() => {
-    setNodes(rfNodes);
-    setEdges(rfEdges);
-  }, [rfNodes, rfEdges, setNodes, setEdges]);
-
-  const handleNodesChange = useCallback(
-    (changes: NodeChange<Node<AnyData>>[]) => {
-      // Snap block drags to slot grid; lock Y to original track
-      const snapped = changes.map((c) => {
-        if (c.type !== 'position' || !c.position) return c;
-        const node = nodes.find((n) => n.id === c.id);
-        if (!node || node.type !== 'block') return c;
-        // Find which track this block belongs to
-        const blockData = node.data as TimelineBlockNodeData;
-        if (!blockData?.block) return c;
-        // Find original track y
-        let trackY = node.position.y;
-        for (const t of scenario.tracks) {
-          if (t.blocks.some((b) => b.id === c.id)) {
-            const info = trackTopById.get(t.id);
-            if (info) trackY = info.y + 12;
-            break;
-          }
-        }
-        if (scenario.errorHandler.blocks.some((b) => b.id === c.id)) {
-          const info = trackTopById.get(scenario.errorHandler.id);
-          if (info) trackY = info.y + 12;
-        }
-        // Snap x to slot
-        const snappedSlot = Math.max(0, Math.round((c.position.x - 18) / SLOT_PX));
-        return {
-          ...c,
-          position: { x: snappedSlot * SLOT_PX + 18, y: trackY },
-        };
-      });
-      onNodesChange(snapped);
-
-      // On drag end, update the block's slot
-      const dragEnd = snapped.find((c) => c.type === 'position' && !c.dragging);
-      if (dragEnd && dragEnd.type === 'position' && dragEnd.position) {
-        const newSlot = Math.max(0, Math.round((dragEnd.position.x - 18) / SLOT_PX));
-        // Find which track the block is in
-        for (const t of scenario.tracks) {
-          const block = t.blocks.find((b) => b.id === dragEnd.id);
-          if (block && block.slot !== newSlot) {
-            onUpdateBlock(t.id, block.id, { slot: newSlot });
-            return;
-          }
-        }
-        const errBlock = scenario.errorHandler.blocks.find((b) => b.id === dragEnd.id);
-        if (errBlock && errBlock.slot !== newSlot) {
-          onUpdateBlock(scenario.errorHandler.id, errBlock.id, { slot: newSlot });
-        }
-      }
-    },
-    [onNodesChange, nodes, scenario, trackTopById, onUpdateBlock],
-  );
-
-  const handleNodeClick = useCallback(
-    (_e: React.MouseEvent, node: Node) => {
-      if (node.type !== 'block') return;
-      // Find track
-      for (const t of scenario.tracks) {
-        if (t.blocks.some((b) => b.id === node.id)) {
-          onSelectBlock(t.id, node.id);
-          return;
-        }
-      }
-      if (scenario.errorHandler.blocks.some((b) => b.id === node.id)) {
-        onSelectBlock(scenario.errorHandler.id, node.id);
-      }
-    },
-    [scenario, onSelectBlock],
-  );
+  const canvasW = totalSlots * SLOT_W;
 
   return (
-    <div className="relative h-full w-full" style={{ background: 'var(--fl-bg)' }}>
-      {/* Track lane backgrounds (absolute, non-interactive) */}
-      <div className="pointer-events-none absolute inset-0 z-0">
-        {trackLayout.map((t) => (
-          <TrackLane
-            key={t.trackId}
-            y={t.y}
-            height={t.height}
-            color={t.trackColor}
-            name={t.trackName}
-            totalWidth={totalSlots * SLOT_PX}
-            isErrorHandler={t.isErrorHandler}
-          />
-        ))}
+    <div className="fl-scroll relative h-full w-full overflow-auto bg-fl-bg">
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: `${LEFT_W}px ${canvasW}px`,
+        }}
+      >
+        {/* ── Corner cell ── */}
+        <div
+          className="sticky left-0 top-0 z-[30] border-b border-r border-fl-border bg-fl-panel"
+          style={{ height: RULER_H }}
+        />
+
+        {/* ── Ruler ── */}
+        <div
+          className="sticky top-0 z-[20] flex border-b border-fl-border bg-fl-panel"
+          style={{ height: RULER_H }}
+        >
+          {Array.from({ length: totalSlots }, (_, i) => (
+            <div
+              key={i}
+              className="flex items-center justify-center border-r border-fl-border/40 font-mono text-[9px] text-fl-text-ghost"
+              style={{ width: SLOT_W }}
+            >
+              {i}
+            </div>
+          ))}
+        </div>
+
+        {/* ── Track rows ── */}
+        {scenario.tracks.map((track) => {
+          const currentSlot = currentSlotByTrack[track.id];
+          return (
+            <Fragment key={track.id}>
+              <TrackHeader
+                name={track.name}
+                color={track.color}
+                onRename={(name) => onRenameTrack(track.id, name)}
+                onDelete={() => onDeleteTrack(track.id)}
+              />
+              <TrackCanvas
+                totalSlots={totalSlots}
+                color={track.color}
+                currentSlot={currentSlot}
+                onClick={(slot) => onCanvasClick(track.id, slot)}
+              >
+                {track.blocks.map((block) => (
+                  <TimelineBlock
+                    key={block.id}
+                    block={block}
+                    trackColor={track.color}
+                    status={blockStatus[block.id] ?? 'idle'}
+                    selected={selectedBlockId === block.id}
+                    slotW={SLOT_W}
+                    trackH={TRACK_H}
+                    onSelect={() => onSelectBlock(track.id, block.id)}
+                    onOpen={() => onOpenBlock(track.id, block.id)}
+                    onDelete={() => onDeleteBlock(track.id, block.id)}
+                    onSlotChange={(newSlot) =>
+                      onUpdateBlock(track.id, block.id, { slot: newSlot })
+                    }
+                  />
+                ))}
+                {/* Sync point vertical bars */}
+                {scenario.syncPoints.map((sp) => (
+                  <div
+                    key={sp.id}
+                    className="pointer-events-none absolute top-0 h-full w-0"
+                    style={{
+                      left: sp.slot * SLOT_W + SLOT_W / 2,
+                      borderLeft: '2px dashed #f43f5e88',
+                    }}
+                  />
+                ))}
+              </TrackCanvas>
+            </Fragment>
+          );
+        })}
+
+        {/* ── Add track row ── */}
+        <div
+          className="sticky left-0 z-[10] flex items-center justify-center border-b border-r border-fl-border bg-fl-panel"
+          style={{ height: ADD_TRACK_H }}
+        >
+          <button
+            type="button"
+            onClick={onAddTrack}
+            className="flex items-center gap-1 font-mono text-[9px] text-fl-text-ghost transition-colors hover:text-[#3b82f6]"
+          >
+            <Plus className="h-2.5 w-2.5" /> トラック追加
+          </button>
+        </div>
+        <div
+          className="border-b border-fl-border bg-fl-bg"
+          style={{ height: ADD_TRACK_H }}
+        />
+
+        {/* ── Error handler separator ── */}
+        <div
+          className="sticky left-0 z-[10] flex items-center gap-1 border-b border-r border-[#f43f5e44] bg-[#f43f5e14] px-3"
+          style={{ height: ERROR_SEPARATOR_H }}
+        >
+          <AlertTriangle className="h-2.5 w-2.5 text-[#f43f5e]" />
+          <span className="font-mono text-[8px] font-bold tracking-wider text-[#f43f5e]">
+            ERROR HANDLER
+          </span>
+        </div>
+        <div
+          className="flex items-center border-b border-[#f43f5e44] bg-[#f43f5e14] px-3"
+          style={{ height: ERROR_SEPARATOR_H }}
+        >
+          <span className="font-mono text-[8px] text-[#f43f5e99]">
+            abort 発火時のみ実行されるクリーンアップトラック
+          </span>
+        </div>
+
+        {/* ── Error handler track ── */}
+        <TrackHeader
+          name={scenario.errorHandler.name}
+          color="#f43f5e"
+          isErrorHandler
+        />
+        <TrackCanvas
+          totalSlots={totalSlots}
+          color="#f43f5e"
+          isErrorHandler
+          currentSlot={currentSlotByTrack[scenario.errorHandler.id]}
+          onClick={(slot) => onCanvasClick(scenario.errorHandler.id, slot)}
+        >
+          {scenario.errorHandler.blocks.map((block) => (
+            <TimelineBlock
+              key={block.id}
+              block={block}
+              trackColor="#f43f5e"
+              status={blockStatus[block.id] ?? 'idle'}
+              selected={selectedBlockId === block.id}
+              slotW={SLOT_W}
+              trackH={TRACK_H}
+              onSelect={() => onSelectBlock(scenario.errorHandler.id, block.id)}
+              onOpen={() =>
+                onOpenBlock(scenario.errorHandler.id, block.id)
+              }
+              onDelete={() =>
+                onDeleteBlock(scenario.errorHandler.id, block.id)
+              }
+              onSlotChange={(newSlot) =>
+                onUpdateBlock(scenario.errorHandler.id, block.id, {
+                  slot: newSlot,
+                })
+              }
+            />
+          ))}
+        </TrackCanvas>
       </div>
 
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={onEdgesChange}
-        onNodeClick={handleNodeClick}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.15 }}
-        minZoom={0.3}
-        maxZoom={2}
-        proOptions={{ hideAttribution: true }}
-        panOnDrag
-        selectNodesOnDrag={false}
-      >
-        <Background color="var(--fl-border)" gap={SLOT_PX / 4} size={1} />
-        <Controls
+      {/* Sync point labels floating over the ruler */}
+      {scenario.syncPoints.map((sp) => (
+        <div
+          key={sp.id}
+          className="group absolute z-[25]"
           style={{
-            background: 'var(--fl-panel)',
-            border: '1px solid var(--fl-border)',
+            top: 6,
+            left: LEFT_W + sp.slot * SLOT_W + SLOT_W / 2,
+            transform: 'translateX(-50%)',
           }}
-        />
-        <MiniMap
-          nodeColor={(n) => {
-            if (n.type === 'syncBarrier') return '#f43f5e';
-            const d = n.data as TimelineBlockNodeData;
-            return d?.trackColor ?? '#3b82f6';
-          }}
-          style={{
-            background: 'var(--fl-panel)',
-            border: '1px solid var(--fl-border)',
-          }}
-          maskColor="rgba(0, 0, 0, 0.5)"
-        />
-      </ReactFlow>
+        >
+          <button
+            type="button"
+            onClick={() => onDeleteSyncPoint(sp.id)}
+            className="flex items-center gap-1 rounded border border-[#f43f5e66] bg-fl-panel px-1 py-px font-mono text-[8px] font-bold text-[#f43f5e] shadow transition-colors hover:border-[#f43f5e] hover:bg-[#f43f5e22]"
+            title={`${sp.label} #${sp.slot} (クリックで削除)`}
+          >
+            ‖ {sp.label}
+            <Trash2 className="h-2 w-2 opacity-0 transition-opacity group-hover:opacity-100" />
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
 
-function TrackLane({
-  y,
-  height,
-  color,
+// ── Track header (sticky left) ──────────────
+
+function TrackHeader({
   name,
-  totalWidth,
+  color,
   isErrorHandler,
+  onRename,
+  onDelete,
 }: {
-  y: number;
-  height: number;
-  color: string;
   name: string;
-  totalWidth: number;
-  isErrorHandler: boolean;
+  color: string;
+  isErrorHandler?: boolean;
+  onRename?: (name: string) => void;
+  onDelete?: () => void;
 }) {
   return (
-    <>
-      {/* Lane background */}
-      <div
-        className="absolute rounded-md"
-        style={{
-          left: 0,
-          top: y,
-          width: totalWidth + 80,
-          height,
-          background: isErrorHandler ? '#f43f5e0a' : `${color}0a`,
-          border: `1px dashed ${isErrorHandler ? '#f43f5e33' : `${color}33`}`,
-        }}
+    <div
+      className="group sticky left-0 z-[10] flex items-center gap-2 border-b border-r border-fl-border bg-fl-panel px-3"
+      style={{
+        height: TRACK_H,
+        borderLeftWidth: 4,
+        borderLeftStyle: 'solid',
+        borderLeftColor: color,
+        background: isErrorHandler ? '#f43f5e0c' : 'var(--fl-panel)',
+      }}
+    >
+      <span
+        className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+        style={{ background: color }}
       />
-      {/* Track name */}
-      <div
-        className="absolute flex items-center gap-1.5 rounded-md border bg-fl-panel px-2 py-0.5 font-mono text-[9px] font-bold shadow"
-        style={{
-          left: 8,
-          top: y - 10,
-          color: isErrorHandler ? '#f43f5e' : color,
-          borderColor: isErrorHandler ? '#f43f5e44' : `${color}44`,
-        }}
-      >
-        <span
-          className="inline-block h-2 w-2 rounded-full"
-          style={{ background: isErrorHandler ? '#f43f5e' : color }}
+      {isErrorHandler ? (
+        <span className="min-w-0 flex-1 truncate font-mono text-[10px] font-bold text-[#f43f5e]">
+          ⚠ {name}
+        </span>
+      ) : (
+        <input
+          defaultValue={name}
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (v && v !== name && onRename) onRename(v);
+            else e.target.value = name;
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+          className="min-w-0 flex-1 truncate bg-transparent font-mono text-[10px] font-bold text-fl-text-muted outline-none focus:text-fl-text"
         />
-        {isErrorHandler ? '⚠ ' + name : name}
-      </div>
-    </>
+      )}
+      {!isErrorHandler && onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          className="flex-shrink-0 text-fl-text-ghost opacity-0 transition-all group-hover:opacity-100 hover:text-red-500"
+          title="トラック削除"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      )}
+    </div>
   );
 }
 
-export function Timeline(props: Props) {
+// ── Track canvas (right side) ────────────────
+
+function TrackCanvas({
+  totalSlots,
+  color,
+  currentSlot,
+  isErrorHandler,
+  onClick,
+  children,
+}: {
+  totalSlots: number;
+  color: string;
+  currentSlot: number | undefined;
+  isErrorHandler?: boolean;
+  onClick: (slot: number) => void;
+  children: React.ReactNode;
+}) {
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const slot = Math.floor((e.clientX - rect.left) / SLOT_W);
+    onClick(slot);
+  };
+
   return (
-    <ReactFlowProvider>
-      <TimelineInner {...props} />
-    </ReactFlowProvider>
+    <div
+      className="relative border-b border-fl-border"
+      style={{
+        height: TRACK_H,
+        background: isErrorHandler ? '#f43f5e08' : `${color}08`,
+      }}
+      onClick={handleClick}
+    >
+      {/* Vertical slot grid lines */}
+      {Array.from({ length: totalSlots + 1 }, (_, i) => (
+        <div
+          key={i}
+          className="pointer-events-none absolute bottom-0 top-0 w-px"
+          style={{
+            left: i * SLOT_W,
+            background: i % 5 === 0 ? 'var(--fl-border)' : 'var(--fl-border-2)',
+          }}
+        />
+      ))}
+      {/* Playhead */}
+      {currentSlot !== undefined && (
+        <div
+          className="pointer-events-none absolute top-0 h-full w-0.5"
+          style={{
+            left: currentSlot * SLOT_W + SLOT_W / 2,
+            background: isErrorHandler ? '#f43f5e' : '#22c55e',
+            boxShadow: `0 0 8px ${isErrorHandler ? '#f43f5eaa' : '#22c55eaa'}`,
+          }}
+        />
+      )}
+      {children}
+    </div>
   );
 }

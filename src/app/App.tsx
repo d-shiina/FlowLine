@@ -576,6 +576,7 @@ export default function App() {
               blockStatus={blockStatus}
               selectedBlockId={selected?.blockId ?? null}
               running={playing}
+              currentSlotByTrack={execution.state.currentSlot}
               onSelectBlock={(tid, bid) => handleBlockClick(tid, bid)}
               onOpenBlock={(tid, bid) =>
                 setEditingBlock({ trackId: tid, blockId: bid })
@@ -585,6 +586,32 @@ export default function App() {
                 store.deleteBlock(tid, bid);
                 if (selected?.blockId === bid) setSelected(null);
               }}
+              onCanvasClick={(trackId, slot) => {
+                if (trackId === ERROR_HANDLER_ID) {
+                  setAddModal({
+                    trackId,
+                    trackName: 'エラー処理',
+                    trackColor: '#f43f5e',
+                    slot,
+                  });
+                  return;
+                }
+                if (mode === 'sync') {
+                  setSyncModal({ slot });
+                  return;
+                }
+                const t = scenario.tracks.find((x) => x.id === trackId);
+                if (!t) return;
+                setAddModal({
+                  trackId,
+                  trackName: t.name,
+                  trackColor: t.color,
+                  slot,
+                });
+              }}
+              onAddTrack={store.addTrack}
+              onRenameTrack={store.renameTrack}
+              onDeleteTrack={store.deleteTrack}
               onDeleteSyncPoint={store.deleteSync}
             />
           ) : (
