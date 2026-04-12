@@ -423,6 +423,24 @@ export class Executor {
     this.log('info', containerId, block.id, `タスク「${block.label}」開始`);
     this.flush();
 
+    // START node: seed local block inputs from scenario variables.
+    // block.inputs = { localName: 'scenario.someKey' }
+    // Makes scenario.someKey's value available as local.localName within the block.
+    if (block.inputs) {
+      for (const [localName, scenarioKey] of Object.entries(block.inputs)) {
+        const value = this.variables.get(scenarioKey);
+        if (value !== undefined) {
+          this.variables.set(`local.${block.id}.${localName}`, value);
+          this.log(
+            'info',
+            containerId,
+            block.id,
+            `[START] ${localName} ← ${scenarioKey} = ${JSON.stringify(value)}`,
+          );
+        }
+      }
+    }
+
     // Reset all step statuses to idle at the start of this run.
     for (const step of block.steps) {
       this.state.status[step.id] = 'idle';
@@ -443,6 +461,24 @@ export class Executor {
       if (this.state.status[step.id] === 'error') {
         failed = true;
         break;
+      }
+    }
+
+    // END node: write block outputs back to scenario variables.
+    if (!failed && !this.aborted && block.outputs) {
+      for (const [localName, scenarioKey] of Object.entries(block.outputs)) {
+        const value =
+          this.variables.get(`local.${block.id}.${localName}`) ??
+          this.variables.get(`scenario.${localName}`);
+        if (value !== undefined) {
+          this.variables.set(scenarioKey, value);
+          this.log(
+            'info',
+            containerId,
+            block.id,
+            `[END] ${scenarioKey} ← ${localName} = ${JSON.stringify(value)}`,
+          );
+        }
       }
     }
 

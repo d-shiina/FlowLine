@@ -55,6 +55,18 @@ export interface Block {
   slot: number;
   /** Internal flowchart steps, executed top-to-bottom by order. */
   steps: Step[];
+  /**
+   * Input variables the block reads from the scenario/timeline at start.
+   * Maps local input name → scenario variable key (e.g. "url" → "scenario.target_url").
+   * Rendered as the Start node's output ports.
+   */
+  inputs?: Record<string, string>;
+  /**
+   * Output variables the block writes back to the scenario at end.
+   * Maps local output name → scenario variable key.
+   * Rendered as the End node's input ports.
+   */
+  outputs?: Record<string, string>;
   /** Max runtime in seconds for the whole task. Undefined = no limit. */
   timeout?: number;
   /** Error handling policy for the whole task. Undefined = abort. */
