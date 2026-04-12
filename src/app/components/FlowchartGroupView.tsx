@@ -12,9 +12,12 @@ interface Props {
   selected: boolean;
   selectedStepId: string | null;
   status: BlockStatus;
+  /** Whether this group is highlighted as a drop target. */
+  dropTarget?: boolean;
   onSelect: (stepId: string) => void;
   onDelete: (stepId: string) => void;
   onAddChild: () => void;
+  onDragStart?: (stepId: string, e: React.MouseEvent) => void;
 }
 
 const meta = STEP_META.group;
@@ -29,11 +32,17 @@ export function FlowchartGroupView({
   childSteps,
   selected,
   selectedStepId,
+  dropTarget,
   onSelect,
   onDelete,
   onAddChild,
+  onDragStart,
 }: Props) {
-  const borderColor = selected ? meta.color : `${meta.color}55`;
+  const borderColor = dropTarget
+    ? '#3b82f6'
+    : selected
+      ? meta.color
+      : `${meta.color}55`;
 
   return (
     <Collapsible.Root defaultOpen className="w-[280px]">
@@ -41,8 +50,12 @@ export function FlowchartGroupView({
         className="overflow-hidden rounded-lg transition-colors"
         style={{
           border: `1.5px solid ${borderColor}`,
-          background: `${meta.color}08`,
-          boxShadow: selected ? `0 0 0 1px ${meta.color}66` : 'none',
+          background: dropTarget ? '#3b82f618' : `${meta.color}08`,
+          boxShadow: dropTarget
+            ? '0 0 0 2px #3b82f666'
+            : selected
+              ? `0 0 0 1px ${meta.color}66`
+              : 'none',
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -104,6 +117,7 @@ export function FlowchartGroupView({
                     status="idle"
                     onSelect={onSelect}
                     onDelete={onDelete}
+                    onDragStart={onDragStart}
                   />
                 </div>
               ))

@@ -9,6 +9,8 @@ interface Props {
   status: BlockStatus;
   onSelect: (stepId: string) => void;
   onDelete: (stepId: string) => void;
+  /** Called on mousedown to let the parent start a drag. */
+  onDragStart?: (stepId: string, e: React.MouseEvent) => void;
 }
 
 /**
@@ -23,6 +25,7 @@ export function FlowchartStepView({
   status,
   onSelect,
   onDelete,
+  onDragStart,
 }: Props) {
   const [hov, setHov] = useState(false);
   const meta = STEP_META[step.type];
@@ -79,6 +82,11 @@ export function FlowchartStepView({
       }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
+      onMouseDown={(e) => {
+        if (e.button === 0 && onDragStart) {
+          onDragStart(step.id, e);
+        }
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onSelect(step.id);

@@ -250,7 +250,7 @@ export class Executor {
     this.flush();
 
     const topLevel = block.steps
-      .filter((s) => !s.parentStepId)
+      .filter((s) => !s.parentStepId && s.inFlow !== false)
       .sort((a, b) => a.order - b.order);
 
     let failed = false;

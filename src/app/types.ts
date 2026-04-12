@@ -150,6 +150,13 @@ export interface Step {
   parentStepId?: string;
   /** Case label within parent (then/else for branch, case names for switch). */
   parentBranch?: string;
+  /**
+   * When `false`, this step lives in the free area (not executed).
+   * Undefined or `true` means the step is part of the main flow.
+   */
+  inFlow?: boolean;
+  /** Absolute position on the canvas for free-area steps. */
+  position?: { x: number; y: number };
 }
 
 export const STEP_META: Record<
