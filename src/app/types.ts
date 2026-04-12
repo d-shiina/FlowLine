@@ -108,6 +108,8 @@ export interface Block {
    * as the default; the user can flip it via the Inspector.
    */
   parentBranch?: string;
+  /** Internal flowchart. Empty = legacy mode (use type/parentBlockId). */
+  steps: Step[];
 }
 
 export interface Track {
@@ -174,3 +176,52 @@ export const TRACK_COLORS = [
   '#06B6D4',
   '#8B5CF6',
 ];
+
+// ── Flowchart step model ──────────────────────────────
+
+export type StepType =
+  | 'action'
+  | 'wait'
+  | 'loop'
+  | 'branch'
+  | 'switch'
+  | 'subroutine';
+
+/**
+ * One step inside a Block's internal flowchart.
+ *
+ * Steps execute top-to-bottom by ``order``. Control flow steps
+ * (loop / branch / switch) nest children via ``parentStepId`` +
+ * ``parentBranch``, exactly like the old Block nesting model.
+ */
+export interface Step {
+  id: string;
+  type: StepType;
+  label: string;
+  /** Execution order within the flowchart (0, 1, 2, ...). */
+  order: number;
+  /** Python node id, e.g. ``desktop/click``. */
+  nodeId?: string;
+  params?: Record<string, unknown>;
+  bindings?: Record<string, PortBinding>;
+  timeout?: number;
+  skipIfMissing?: boolean;
+  onError?: OnError;
+  subroutineId?: string;
+  /** Parent control-flow step id (for nesting inside loop/branch/switch). */
+  parentStepId?: string;
+  /** Case label within parent (then/else for branch, case names for switch). */
+  parentBranch?: string;
+}
+
+export const STEP_META: Record<
+  StepType,
+  { color: string; icon: string; label: string }
+> = {
+  action: { color: '#3B82F6', icon: '▶', label: 'アクション' },
+  wait: { color: '#06B6D4', icon: '⏸', label: '待機' },
+  loop: { color: '#8B5CF6', icon: '↻', label: 'ループ' },
+  branch: { color: '#F59E0B', icon: '⑂', label: '分岐' },
+  switch: { color: '#EC4899', icon: '⧉', label: 'スイッチ' },
+  subroutine: { color: '#94A3B8', icon: '⎔', label: 'サブルーチン' },
+};

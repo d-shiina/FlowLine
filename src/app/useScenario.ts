@@ -300,7 +300,8 @@ export function useScenario(): ScenarioStore {
             undefined,
             laneKey(block),
           );
-          return [...withRoom, block];
+          const blockWithSteps = block.steps ? block : { ...block, steps: [] };
+          return [...withRoom, blockWithSteps];
         }),
       );
     },

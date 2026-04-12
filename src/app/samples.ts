@@ -32,10 +32,10 @@ const basic: Scenario = {
       name: 'メインフロー',
       color: '#3B82F6',
       blocks: [
-        { id: 'b-1', type: 'action', label: 'アプリ起動', slot: 0 },
-        { id: 'b-2', type: 'action', label: 'データ入力', slot: 1 },
-        { id: 'b-3', type: 'action', label: '送信', slot: 2 },
-        { id: 'b-4', type: 'action', label: '完了通知', slot: 3 },
+        { id: 'b-1', type: 'action', label: 'アプリ起動', slot: 0, steps: [] },
+        { id: 'b-2', type: 'action', label: 'データ入力', slot: 1, steps: [] },
+        { id: 'b-3', type: 'action', label: '送信', slot: 2, steps: [] },
+        { id: 'b-4', type: 'action', label: '完了通知', slot: 3, steps: [] },
       ],
     },
   ],
@@ -63,10 +63,10 @@ const parallel: Scenario = {
       name: 'Excel処理',
       color: '#3B82F6',
       blocks: [
-        { id: 'b-10', type: 'action', label: 'Excel起動', slot: 0 },
-        { id: 'b-11', type: 'action', label: 'データ読込', slot: 1 },
-        { id: 'b-12', type: 'loop', label: '行ループ', slot: 2 },
-        { id: 'b-13', type: 'action', label: 'ファイル保存', slot: 3 },
+        { id: 'b-10', type: 'action', label: 'Excel起動', slot: 0, steps: [] },
+        { id: 'b-11', type: 'action', label: 'データ読込', slot: 1, steps: [] },
+        { id: 'b-12', type: 'loop', label: '行ループ', slot: 2, steps: [] },
+        { id: 'b-13', type: 'action', label: 'ファイル保存', slot: 3, steps: [] },
       ],
     },
     {
@@ -74,16 +74,17 @@ const parallel: Scenario = {
       name: 'メール処理',
       color: '#22C55E',
       blocks: [
-        { id: 'b-20', type: 'action', label: '下書き作成', slot: 0 },
-        { id: 'b-21', type: 'action', label: '添付追加', slot: 1 },
+        { id: 'b-20', type: 'action', label: '下書き作成', slot: 0, steps: [] },
+        { id: 'b-21', type: 'action', label: '添付追加', slot: 1, steps: [] },
         {
           id: 'b-22',
           type: 'action',
           label: 'ダイアログ閉じる',
           slot: 2,
           skipIfMissing: true,
+          steps: [],
         },
-        { id: 'b-23', type: 'action', label: 'メール送信', slot: 5 },
+        { id: 'b-23', type: 'action', label: 'メール送信', slot: 5, steps: [] },
       ],
     },
     {
@@ -91,7 +92,7 @@ const parallel: Scenario = {
       name: 'ログ記録',
       color: '#F59E0B',
       blocks: [
-        { id: 'b-30', type: 'action', label: 'ログ開始', slot: 0 },
+        { id: 'b-30', type: 'action', label: 'ログ開始', slot: 0, steps: [] },
         {
           id: 'b-31',
           type: 'action',
@@ -99,6 +100,7 @@ const parallel: Scenario = {
           slot: 5,
           onError: { retry: 3, then: 'skip' },
           timeout: 60,
+          steps: [],
         },
       ],
     },
@@ -141,6 +143,7 @@ const controlFlow: Scenario = {
           type: 'action',
           label: '初期化',
           slot: 0,
+          steps: [],
         },
         // Fixed-count loop: runs body 3 times. Container and body
         // share column 1 — the header bar sits at the top of that
@@ -151,6 +154,7 @@ const controlFlow: Scenario = {
           label: '3 回くり返し',
           slot: 1,
           params: { iterations: 3 },
+          steps: [],
         },
         {
           id: 'b-loop1-work',
@@ -158,6 +162,7 @@ const controlFlow: Scenario = {
           label: 'ワーク',
           slot: 1,
           parentBlockId: 'b-loop1',
+          steps: [],
         },
         // Branch: TRUE and FALSE children share column 2 so the
         // fork visually lines up. The lane axes are independent,
@@ -175,6 +180,7 @@ const controlFlow: Scenario = {
               ],
             },
           },
+          steps: [],
         },
         {
           id: 'b-then',
@@ -183,6 +189,7 @@ const controlFlow: Scenario = {
           slot: 2,
           parentBlockId: 'b-branch',
           parentBranch: 'then',
+          steps: [],
         },
         {
           id: 'b-else',
@@ -191,6 +198,7 @@ const controlFlow: Scenario = {
           slot: 2,
           parentBlockId: 'b-branch',
           parentBranch: 'else',
+          steps: [],
         },
         // While loop: runs body while ``track.track-1.loop_index``
         // is still less than 2, so it executes twice then stops.
@@ -204,6 +212,7 @@ const controlFlow: Scenario = {
               '<': [{ var: 'track.track-1.loop_index' }, 2],
             },
           },
+          steps: [],
         },
         {
           id: 'b-loop2-poll',
@@ -211,12 +220,14 @@ const controlFlow: Scenario = {
           label: 'ステータス確認',
           slot: 3,
           parentBlockId: 'b-loop2',
+          steps: [],
         },
         {
           id: 'b-done',
           type: 'action',
           label: '完了通知',
           slot: 4,
+          steps: [],
         },
       ],
     },
@@ -249,6 +260,7 @@ const switchDemo: Scenario = {
           type: 'action',
           label: 'ステータス取得',
           slot: 0,
+          steps: [],
         },
         {
           id: 'b-switch',
@@ -259,6 +271,7 @@ const switchDemo: Scenario = {
             expression: { var: 'scenario.status' },
             cases: ['ok', 'warn', 'error', 'default'],
           },
+          steps: [],
         },
         // All four lanes at column 1 — the switch container
         // header sits above and each case stacks vertically in
@@ -270,6 +283,7 @@ const switchDemo: Scenario = {
           slot: 1,
           parentBlockId: 'b-switch',
           parentBranch: 'ok',
+          steps: [],
         },
         {
           id: 'b-warn',
@@ -278,6 +292,7 @@ const switchDemo: Scenario = {
           slot: 1,
           parentBlockId: 'b-switch',
           parentBranch: 'warn',
+          steps: [],
         },
         {
           id: 'b-err',
@@ -286,6 +301,7 @@ const switchDemo: Scenario = {
           slot: 1,
           parentBlockId: 'b-switch',
           parentBranch: 'error',
+          steps: [],
         },
         {
           id: 'b-def',
@@ -294,12 +310,14 @@ const switchDemo: Scenario = {
           slot: 1,
           parentBlockId: 'b-switch',
           parentBranch: 'default',
+          steps: [],
         },
         {
           id: 'b-done',
           type: 'action',
           label: '完了通知',
           slot: 2,
+          steps: [],
         },
       ],
     },

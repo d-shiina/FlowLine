@@ -92,6 +92,7 @@ export function AddBlockModal({
       type,
       label: finalLabel,
       slot,
+      steps: [],
       ...(params !== undefined ? { params } : {}),
       ...(type === 'subroutine' ? { subroutineId } : {}),
     });
