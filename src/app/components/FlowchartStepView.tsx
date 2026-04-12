@@ -15,16 +15,12 @@ interface Props {
   onRunStep?: (stepId: string) => void;
 }
 
-const CAT_ICON: Record<string, string> = {
-  browser: '🌐',
-  debug: '🔧',
-  desktop: '🖥',
-  file: '📁',
-  http: '🔗',
-  email: '✉',
-  excel: '📊',
-  custom: '⚙',
-};
+/** Derive a short icon from the category name. No hardcoded map needed. */
+function catIcon(category?: string): string {
+  if (!category) return '▶';
+  // Use the first letter uppercased as a simple badge
+  return category.charAt(0).toUpperCase();
+}
 
 export function FlowchartStepView({
   step,
@@ -70,7 +66,7 @@ export function FlowchartStepView({
         ? `0 0 0 1px ${meta.color}44`
         : 'none';
 
-  const icon = node ? (CAT_ICON[node.category] ?? '⚙') : meta.icon;
+  const icon = node ? catIcon(node.category) : meta.icon;
 
   const inPorts = node
     ? Object.entries(node.ports).filter(([, d]) => d.kind === 'in')
@@ -104,7 +100,12 @@ export function FlowchartStepView({
         className="flex items-center gap-1.5 rounded-t-[5px] px-2.5 py-1.5"
         style={{ background: `${accent}18` }}
       >
-        <span className="text-[12px] leading-none">{icon}</span>
+        <span
+          className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-[9px] font-bold"
+          style={{ background: `${accent}22`, color: accent }}
+        >
+          {icon}
+        </span>
         <span
           className="min-w-0 flex-1 truncate font-mono text-[11px] font-bold"
           style={{ color: accent }}
