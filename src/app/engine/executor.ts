@@ -1,4 +1,4 @@
-import type { Block, OnError, Scenario, Track } from '../types';
+import type { Block, OnError, Scenario, Step, Track } from '../types';
 import type {
   BlockStatus,
   ExecutionState,
@@ -94,13 +94,20 @@ export class Executor {
     // Initialize every block's status to idle so the UI can distinguish
     // "not yet executed" from "absent".
     for (const t of this.scenario.tracks) {
-      for (const b of t.blocks) this.state.status[b.id] = 'idle';
+      for (const b of t.blocks) {
+        this.state.status[b.id] = 'idle';
+        for (const s of b.steps) this.state.status[s.id] = 'idle';
+      }
     }
     for (const b of this.scenario.errorHandler.blocks) {
       this.state.status[b.id] = 'idle';
+      for (const s of b.steps) this.state.status[s.id] = 'idle';
     }
-    for (const s of this.scenario.subroutines) {
-      for (const b of s.blocks) this.state.status[b.id] = 'idle';
+    for (const sub of this.scenario.subroutines) {
+      for (const b of sub.blocks) {
+        this.state.status[b.id] = 'idle';
+        for (const s of b.steps) this.state.status[s.id] = 'idle';
+      }
     }
     this.log('info', undefined, undefined, 'シナリオ実行開始');
     this.flush();
@@ -224,6 +231,13 @@ export class Executor {
     block: Block,
     opts: { isErrorHandler: boolean },
   ): Promise<void> {
+    // New model: block has an internal flowchart — run its steps instead.
+    if (block.steps.length > 0) {
+      await this.executeTask(containerId, block, opts);
+      return;
+    }
+
+    // Legacy: type-based dispatch (unchanged).
     if (block.type === 'loop') {
       await this.executeLoop(containerId, trackBlocks, block, opts);
       return;
@@ -259,6 +273,366 @@ export class Executor {
           (branch === undefined || (b.parentBranch ?? '') === branch),
       )
       .sort((a, b) => a.slot - b.slot);
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Step-based execution (new model)
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Execute the internal flowchart of a task block (block.steps).
+   * Top-level steps run in order; control-flow steps recurse.
+   */
+  private async executeTask(
+    containerId: string,
+    block: Block,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    this.state.status[block.id] = 'running';
+    this.log('info', containerId, block.id, `タスク「${block.label}」開始`);
+    this.flush();
+
+    // Reset all step statuses to idle at the start of this run.
+    for (const step of block.steps) {
+      this.state.status[step.id] = 'idle';
+    }
+    this.flush();
+
+    const topLevel = block.steps
+      .filter((s) => !s.parentStepId)
+      .sort((a, b) => a.order - b.order);
+
+    let failed = false;
+    for (const step of topLevel) {
+      if (this.aborted) {
+        this.markCancelled(step.id);
+        continue;
+      }
+      await this.executeStepOrGroup(containerId, block, step, opts);
+      if (this.state.status[step.id] === 'error') {
+        failed = true;
+        break;
+      }
+    }
+
+    if (this.aborted) {
+      this.state.status[block.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[block.id] = 'error';
+    } else {
+      this.state.status[block.id] = 'ok';
+      this.log('info', containerId, block.id, `タスク「${block.label}」完了`);
+    }
+    this.flush();
+  }
+
+  /** Dispatch a single step to the appropriate executor. */
+  private async executeStepOrGroup(
+    containerId: string,
+    block: Block,
+    step: Step,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    if (step.type === 'loop') {
+      await this.executeStepLoop(containerId, block, step, opts);
+      return;
+    }
+    if (step.type === 'branch') {
+      await this.executeStepBranch(containerId, block, step, opts);
+      return;
+    }
+    if (step.type === 'switch') {
+      await this.executeStepSwitch(containerId, block, step, opts);
+      return;
+    }
+    await this.executeStep(containerId, block, step, opts);
+  }
+
+  /**
+   * Execute a leaf step (action / wait / subroutine) by adapting it
+   * to a Block-compatible shape and delegating to executeBlock /
+   * executeSubroutine, which already handle retry + onError policies.
+   */
+  private async executeStep(
+    containerId: string,
+    _block: Block,
+    step: Step,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    if (step.type === 'subroutine') {
+      const fakeBlock: Block = {
+        id: step.id,
+        type: 'subroutine',
+        label: step.label,
+        slot: 0,
+        steps: [],
+        subroutineId: step.subroutineId,
+      };
+      await this.executeSubroutine(containerId, fakeBlock);
+      return;
+    }
+
+    const stepAsBlock: Block = {
+      id: step.id,
+      // action / wait map 1-to-1 to BlockType
+      type: step.type as 'action' | 'wait',
+      label: step.label,
+      slot: 0,
+      steps: [],
+      nodeId: step.nodeId,
+      params: step.params,
+      bindings: step.bindings,
+      timeout: step.timeout,
+      skipIfMissing: step.skipIfMissing,
+      onError: step.onError,
+    };
+    await this.executeBlock(containerId, stepAsBlock, opts);
+  }
+
+  /** Children of a step within the block's step pool, sorted by order. */
+  private stepChildrenOf(
+    steps: Step[],
+    parentId: string,
+    branch?: string,
+  ): Step[] {
+    return steps
+      .filter(
+        (s) =>
+          s.parentStepId === parentId &&
+          (branch === undefined || (s.parentBranch ?? '') === branch),
+      )
+      .sort((a, b) => a.order - b.order);
+  }
+
+  /** Loop step — mirrors executeLoop but uses stepChildrenOf. */
+  private async executeStepLoop(
+    containerId: string,
+    block: Block,
+    loopStep: Step,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    const LOOP_MAX = 10_000;
+    const params = (loopStep.params as Record<string, unknown>) ?? {};
+    const whileCondition =
+      params.whileCondition !== undefined ? params.whileCondition : null;
+    const rawIterations = params.iterations;
+    const iterations =
+      typeof rawIterations === 'number' && rawIterations > 0
+        ? Math.floor(rawIterations)
+        : 1;
+
+    this.state.status[loopStep.id] = 'running';
+    this.log(
+      'info',
+      containerId,
+      loopStep.id,
+      whileCondition !== null
+        ? `ループ開始 (条件式、最大 ${LOOP_MAX} 回)`
+        : `ループ開始 (${iterations} 回)`,
+    );
+    this.flush();
+
+    const children = this.stepChildrenOf(block.steps, loopStep.id);
+    const evalVars = {
+      getVariable: (key: string) => this.variables.get(key),
+      onWarn: (msg: string) =>
+        this.log('warn', containerId, loopStep.id, `条件式: ${msg}`),
+    };
+
+    let failed = false;
+    let i = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (this.aborted) break;
+      if (whileCondition !== null) {
+        if (!evalBool(whileCondition, evalVars)) break;
+        if (i >= LOOP_MAX) {
+          this.log(
+            'warn',
+            containerId,
+            loopStep.id,
+            `ループ上限 ${LOOP_MAX} 回に到達、打ち切り`,
+          );
+          break;
+        }
+      } else {
+        if (i >= iterations) break;
+      }
+      if (whileCondition !== null || iterations > 1) {
+        this.log(
+          'info',
+          containerId,
+          loopStep.id,
+          whileCondition !== null
+            ? `反復 ${i + 1} (条件式)`
+            : `反復 ${i + 1}/${iterations}`,
+        );
+      }
+      this.variables.set(`track.${containerId}.loop_index`, i);
+      for (const child of children) {
+        if (this.aborted) break;
+        await this.executeStepOrGroup(containerId, block, child, opts);
+        if (this.state.status[child.id] === 'error') {
+          failed = true;
+          break;
+        }
+      }
+      if (failed) break;
+      i++;
+    }
+
+    if (this.aborted) {
+      this.state.status[loopStep.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[loopStep.id] = 'error';
+    } else {
+      this.state.status[loopStep.id] = 'ok';
+      this.log('info', containerId, loopStep.id, 'ループ完了');
+    }
+    this.flush();
+  }
+
+  /** Branch step — mirrors executeBranch but uses stepChildrenOf. */
+  private async executeStepBranch(
+    containerId: string,
+    block: Block,
+    branchStep: Step,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    this.state.status[branchStep.id] = 'running';
+    this.flush();
+
+    const condition = (branchStep.params as Record<string, unknown>)?.condition;
+    const taken = evalBool(condition, {
+      getVariable: (key) => this.variables.get(key),
+      onWarn: (msg) =>
+        this.log('warn', containerId, branchStep.id, `条件式: ${msg}`),
+    });
+    this.log(
+      'info',
+      containerId,
+      branchStep.id,
+      `条件 → ${taken ? 'TRUE' : 'FALSE'}`,
+    );
+
+    const winners = this.stepChildrenOf(
+      block.steps,
+      branchStep.id,
+      taken ? 'then' : 'else',
+    );
+    const losers = this.stepChildrenOf(
+      block.steps,
+      branchStep.id,
+      taken ? 'else' : 'then',
+    );
+    for (const loser of losers) this.state.status[loser.id] = 'skipped';
+    this.flush();
+
+    let failed = false;
+    for (const child of winners) {
+      if (this.aborted) break;
+      await this.executeStepOrGroup(containerId, block, child, opts);
+      if (this.state.status[child.id] === 'error') {
+        failed = true;
+        break;
+      }
+    }
+
+    if (this.aborted) {
+      this.state.status[branchStep.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[branchStep.id] = 'error';
+    } else {
+      this.state.status[branchStep.id] = 'ok';
+    }
+    this.flush();
+  }
+
+  /** Switch step — mirrors executeSwitch but uses stepChildrenOf. */
+  private async executeStepSwitch(
+    containerId: string,
+    block: Block,
+    switchStep: Step,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    this.state.status[switchStep.id] = 'running';
+    this.flush();
+
+    const params = (switchStep.params as Record<string, unknown>) ?? {};
+    const rawCases = Array.isArray(params.cases)
+      ? (params.cases as unknown[]).map((c) => String(c))
+      : [];
+    const expression = params.expression;
+    const evalVars = {
+      getVariable: (key: string) => this.variables.get(key),
+      onWarn: (msg: string) =>
+        this.log('warn', containerId, switchStep.id, `式: ${msg}`),
+    };
+    const value = evalJsonLogic(expression, evalVars);
+
+    const looseMatch = (caseLabel: string): boolean => {
+      if (caseLabel === 'default') return false;
+      if (caseLabel === String(value)) return true;
+      if (typeof value === 'number' && !Number.isNaN(Number(caseLabel))) {
+        return Number(caseLabel) === value;
+      }
+      if (typeof value === 'boolean') {
+        return (
+          (caseLabel === 'true' && value === true) ||
+          (caseLabel === 'false' && value === false)
+        );
+      }
+      return false;
+    };
+
+    let winningCase: string | null = rawCases.find(looseMatch) ?? null;
+    if (winningCase === null && rawCases.includes('default')) {
+      winningCase = 'default';
+    }
+    this.log(
+      'info',
+      containerId,
+      switchStep.id,
+      `条件 → ${JSON.stringify(value)} / 一致: ${winningCase ?? '(なし)'}`,
+    );
+
+    for (const caseLabel of rawCases) {
+      if (caseLabel === winningCase) continue;
+      for (const child of this.stepChildrenOf(
+        block.steps,
+        switchStep.id,
+        caseLabel,
+      )) {
+        this.state.status[child.id] = 'skipped';
+      }
+    }
+    this.flush();
+
+    let failed = false;
+    if (winningCase !== null) {
+      const winners = this.stepChildrenOf(
+        block.steps,
+        switchStep.id,
+        winningCase,
+      );
+      for (const child of winners) {
+        if (this.aborted) break;
+        await this.executeStepOrGroup(containerId, block, child, opts);
+        if (this.state.status[child.id] === 'error') {
+          failed = true;
+          break;
+        }
+      }
+    }
+
+    if (this.aborted) {
+      this.state.status[switchStep.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[switchStep.id] = 'error';
+    } else {
+      this.state.status[switchStep.id] = 'ok';
+    }
+    this.flush();
   }
 
   /**
