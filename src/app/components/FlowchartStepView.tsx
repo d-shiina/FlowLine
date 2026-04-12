@@ -240,10 +240,11 @@ export function FlowchartStepView({
             return (
               <div key={name} className="flex items-center gap-1.5 py-0.5">
                 <span
-                  className="inline-block h-[6px] w-[6px] flex-shrink-0 rounded-full"
+                  className={`inline-block h-[6px] w-[6px] flex-shrink-0 rounded-full${bound ? ' animate-pulse' : ''}`}
                   style={{
                     background: bound ? accent : 'transparent',
                     border: `1.5px solid ${bound ? accent : '#94a3b866'}`,
+                    boxShadow: bound ? `0 0 4px ${accent}66` : 'none',
                   }}
                 />
                 <span className="w-[60px] flex-shrink-0 font-mono text-[9px] text-fl-text-dim">
@@ -275,10 +276,11 @@ export function FlowchartStepView({
                 />
                 <span className="font-mono text-[9px] text-fl-text-dim">{name}</span>
                 <span
-                  className="inline-block h-[6px] w-[6px] flex-shrink-0 rounded-full"
+                  className={`inline-block h-[6px] w-[6px] flex-shrink-0 rounded-full${bound ? ' animate-pulse' : ''}`}
                   style={{
                     background: bound ? accent : 'transparent',
                     border: `1.5px solid ${bound ? accent : '#94a3b866'}`,
+                    boxShadow: bound ? `0 0 4px ${accent}66` : 'none',
                   }}
                 />
               </div>
@@ -306,19 +308,26 @@ export function FlowchartStepView({
   );
 }
 
-/** Horizontal connector arrow between steps. */
+/** Horizontal connector between steps — animated flowing dots. */
 export function StepConnector() {
   return (
-    <div className="flex flex-shrink-0 items-center self-center px-1">
-      <div className="h-0.5 w-4" style={{ background: 'var(--fl-border)' }} />
-      <div
-        className="h-0 w-0"
-        style={{
-          borderTop: '3px solid transparent',
-          borderBottom: '3px solid transparent',
-          borderLeft: '4px solid var(--fl-border)',
-        }}
-      />
+    <div className="flex flex-shrink-0 items-center self-center">
+      <svg width="48" height="20" viewBox="0 0 48 20" className="overflow-visible">
+        {/* Base line */}
+        <line x1="0" y1="10" x2="40" y2="10" stroke="var(--fl-border)" strokeWidth="2" strokeLinecap="round" />
+        {/* Arrow head */}
+        <polygon points="38,5 48,10 38,15" fill="var(--fl-border)" />
+        {/* Animated flowing dots */}
+        <circle r="2" fill="#3b82f6" opacity="0.6">
+          <animateMotion dur="1.5s" repeatCount="indefinite" path="M0,10 L40,10" />
+        </circle>
+        <circle r="2" fill="#3b82f6" opacity="0.4">
+          <animateMotion dur="1.5s" repeatCount="indefinite" begin="0.5s" path="M0,10 L40,10" />
+        </circle>
+        <circle r="2" fill="#3b82f6" opacity="0.2">
+          <animateMotion dur="1.5s" repeatCount="indefinite" begin="1s" path="M0,10 L40,10" />
+        </circle>
+      </svg>
     </div>
   );
 }
