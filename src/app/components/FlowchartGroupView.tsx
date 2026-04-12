@@ -17,8 +17,10 @@ interface Props {
   executionStatus?: Record<string, BlockStatus>;
   /** Whether this group is highlighted as a drop target. */
   dropTarget?: boolean;
+  scenarioVariables?: Record<string, unknown>;
   onSelect: (stepId: string) => void;
   onDelete: (stepId: string) => void;
+  onUpdate?: (stepId: string, patch: Partial<Step>) => void;
   onAddChild: () => void;
   onDragStart?: (stepId: string, e: React.MouseEvent) => void;
   onRunStep?: (stepId: string) => void;
@@ -40,8 +42,10 @@ export function FlowchartGroupView({
   selectedStepId,
   executionStatus,
   dropTarget,
+  scenarioVariables,
   onSelect,
   onDelete,
+  onUpdate,
   onAddChild,
   onDragStart,
   onRunStep,
@@ -125,8 +129,10 @@ export function FlowchartGroupView({
                     selected={selectedStepId === child.id}
                     status={executionStatus?.[child.id] ?? 'idle'}
                     nodeManifest={child.nodeId && manifestMap ? manifestMap.get(child.nodeId) : undefined}
+                    scenarioVariables={scenarioVariables ?? {}}
                     onSelect={onSelect}
                     onDelete={onDelete}
+                    onUpdate={onUpdate ?? (() => {})}
                     onDragStart={onDragStart}
                     onRunStep={onRunStep}
                   />

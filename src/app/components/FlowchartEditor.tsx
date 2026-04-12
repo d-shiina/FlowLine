@@ -6,7 +6,6 @@ import { Breadcrumb } from './Breadcrumb';
 import { FlowchartStepView, StepConnector } from './FlowchartStepView';
 import { FlowchartGroupView } from './FlowchartGroupView';
 import { AddStepModal } from './AddStepModal';
-import { StepInspector } from './StepInspector';
 import { StepGhost } from './StepGhost';
 import { FlowchartContextMenu } from './FlowchartContextMenu';
 import { uid } from '../useScenario';
@@ -388,8 +387,10 @@ export function FlowchartEditor({
                           status={executionStatus[step.id] ?? 'idle'}
                           executionStatus={executionStatus}
                           dropTarget={dropGroupId === step.id}
+                          scenarioVariables={scenarioVariables}
                           onSelect={(id) => handleSelect(id)}
                           onDelete={handleDeleteStep}
+                          onUpdate={handleUpdateStep}
                           onAddChild={() => { setAddStepParent(step.id); setAddStepOpen(true); }}
                           onDragStart={handleDragStart}
                           onRunStep={onRunStep && !running ? onRunStep : undefined}
@@ -402,8 +403,10 @@ export function FlowchartEditor({
                         selected={selectedIds.includes(step.id)}
                         status={executionStatus[step.id] ?? 'idle'}
                         nodeManifest={step.nodeId ? manifestMap.get(step.nodeId) : undefined}
+                        scenarioVariables={scenarioVariables}
                         onSelect={(id) => handleSelect(id)}
                         onDelete={handleDeleteStep}
+                        onUpdate={handleUpdateStep}
                         onDragStart={handleDragStart}
                         onRunStep={onRunStep && !running ? onRunStep : undefined}
                       />
@@ -433,15 +436,6 @@ export function FlowchartEditor({
             </div>
           </div>
         </FlowchartContextMenu>
-
-        <StepInspector
-          step={selectedStep}
-          block={block}
-          nodeManifest={nodeManifest}
-          scenarioVariables={scenarioVariables}
-          subroutines={subroutines}
-          onUpdateStep={handleUpdateStep}
-        />
       </div>
 
       {dragStep && ghostPos && <StepGhost step={dragStep} x={ghostPos.x} y={ghostPos.y} />}
