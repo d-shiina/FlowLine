@@ -124,14 +124,13 @@ def open_session(name: str, headless: bool = False):
 def get_page(name: str = "default"):
     """Return the page for the named session.
 
-    Must be called inside ``run_on_browser``.
-    Raises if the session doesn't exist.
+    Must be called from the browser thread (inside ``run_on_browser``).
+    If the session doesn't exist yet, auto-creates it (headful).
     """
     session = _sessions.get(name)
     if not session:
-        raise ValueError(
-            f"ブラウザ「{name}」が見つかりません。先に browser/open で起動してください。"
-        )
+        # Auto-create session for convenience / backward compatibility.
+        return open_session(name, headless=False)
     return session["page"]
 
 
