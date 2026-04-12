@@ -37,6 +37,15 @@ import { FlowchartEditor } from './components/FlowchartEditor';
  * The error handler track is rendered below the add-track row; it cannot
  * receive sync points.
  */
+/** SHA-256 hex digest using the Web Crypto API. */
+async function sha256(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 type EditorMode =
   | { type: 'scenario' }
   | { type: 'subroutine'; id: string };
@@ -241,14 +250,15 @@ export default function App() {
       for (const nodeId of usedNodeIds) {
         const manifestEntry = nodeManifest.find((n) => n.id === nodeId);
         if (!manifestEntry) continue;
-        // Derive file path from nodeId (e.g. "debug/log" → "debug/log.py")
         const path = `${nodeId}.py`;
         try {
           const result = await runtime.readNodeSource(path);
           if (result.ok && result.source) {
+            const hashHex = await sha256(result.source);
             embeddedNodes.push({
               id: nodeId,
               path,
+              sourceHash: hashHex,
               source: result.source,
               manifest: {
                 label: manifestEntry.label,
@@ -301,16 +311,28 @@ export default function App() {
         if (runtime) {
           const installed: string[] = [];
           const skipped: string[] = [];
+          const updated: string[] = [];
           for (const node of embedded) {
             try {
               // Check if the node file already exists.
               const existing = await runtime.readNodeSource(node.path);
               if (existing.ok && existing.source) {
-                // File already exists — skip to avoid overwriting user's version.
-                skipped.push(node.id);
+                // Compare hashes to detect identical vs. different versions.
+                const existingHash = await sha256(existing.source);
+                if (node.sourceHash && existingHash === node.sourceHash) {
+                  // Identical source — no action needed.
+                  skipped.push(node.id);
+                  continue;
+                }
+                // Different version — update to the embedded version.
+                const writeResult = await runtime.writeNodeSource(
+                  node.path,
+                  node.source,
+                );
+                if (writeResult.ok) updated.push(node.id);
                 continue;
               }
-              // Write the embedded source to disk.
+              // File doesn't exist — write new.
               const writeResult = await runtime.writeNodeSource(
                 node.path,
                 node.source,
@@ -323,8 +345,8 @@ export default function App() {
             }
           }
 
-          // Reload worker to pick up new nodes.
-          if (installed.length > 0) {
+          // Reload worker to pick up new/updated nodes.
+          if (installed.length > 0 || updated.length > 0) {
             try {
               const reloadResult = await runtime.reloadNodes();
               if (reloadResult.ok) {
@@ -338,9 +360,10 @@ export default function App() {
           // Notify user about what happened.
           const parts: string[] = [];
           if (installed.length > 0) {
-            parts.push(
-              `${installed.length} 個のカスタムノードをインストールしました`,
-            );
+            parts.push(`${installed.length} 個の新規ノードをインストール`);
+          }
+          if (updated.length > 0) {
+            parts.push(`${updated.length} 個のノードを更新`);
           }
           if (skipped.length > 0) {
             parts.push(

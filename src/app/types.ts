@@ -117,6 +117,8 @@ export interface EmbeddedNode {
   id: string;
   /** Relative .py path under `_runtime/nodes/`, e.g. "custom/my-action.py". */
   path: string;
+  /** SHA-256 hex digest of the source. Used for smart import conflict detection. */
+  sourceHash: string;
   /** Python source code. */
   source: string;
   /** Manifest snapshot for offline display. */
