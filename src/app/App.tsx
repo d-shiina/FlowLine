@@ -1,24 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ERROR_DIVIDER_H,
-  HEADER_W,
-  MIN_SLOTS,
-  RULER_H,
-  SLOT_PX,
-} from './layout';
 import { useScenario, uid } from './useScenario';
 import { useTheme } from './useTheme';
 import { useExecution } from './engine';
 import { useNodeManifest } from './useNodeManifest';
-import { computeTracksLayout } from './trackLayout';
 import type { Block, Scenario, Track } from './types';
 import { ERROR_HANDLER_ID } from './types';
 import { Titlebar } from './components/Titlebar';
 import { Toolbar, type EditMode } from './components/Toolbar';
 import { FloatingToolbox } from './components/FloatingToolbox';
-import { Ruler } from './components/Ruler';
-import { TrackRow } from './components/TrackRow';
-import { SyncLine } from './components/SyncLine';
+import { Timeline } from './components/Timeline';
 import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
 import { SamplesModal } from './components/SamplesModal';
@@ -103,27 +93,6 @@ export default function App() {
   const execution = useExecution();
   const playing = execution.running;
   const blockStatus = execution.state.status;
-  const currentSlotByTrack = execution.state.currentSlot;
-
-  const totalSlots = useMemo(() => {
-    let max = MIN_SLOTS;
-    if (editorMode.type === 'subroutine' && activeSubroutine) {
-      for (const b of activeSubroutine.blocks) {
-        max = Math.max(max, b.slot + 2);
-      }
-      return max;
-    }
-    for (const t of scenario.tracks) {
-      for (const b of t.blocks) {
-        max = Math.max(max, b.slot + 2);
-      }
-    }
-    for (const b of scenario.errorHandler.blocks) {
-      max = Math.max(max, b.slot + 2);
-    }
-    for (const sp of scenario.syncPoints) max = Math.max(max, sp.slot + 2);
-    return max;
-  }, [scenario, editorMode, activeSubroutine]);
 
   const togglePlay = useCallback(() => {
     if (execution.running) {
@@ -169,7 +138,8 @@ export default function App() {
 
   const isErrorHandlerSelection = selected?.trackId === ERROR_HANDLER_ID;
 
-  const handleCanvasClick = (trackId: string, slot: number) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleCanvasClick = (trackId: string, slot: number) => {
     // The error handler track ignores sync mode — sync points don't apply.
     if (trackId === ERROR_HANDLER_ID) {
       setAddModal({
@@ -311,7 +281,8 @@ export default function App() {
       if (!parsed.version || !Array.isArray(parsed.tracks)) {
         throw new Error('invalid scenario');
       }
-      const { embeddedNodes: _, ...clean } = parsed;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { embeddedNodes: _unused, ...clean } = parsed;
       store.replace(clean as Scenario);
       setSelected(null);
     } catch (err) {
@@ -488,17 +459,6 @@ export default function App() {
   ]);
 
   // ─── render ────────────────────────────────────────────────────────
-  const canvasWidth = totalSlots * SLOT_PX + HEADER_W;
-  // Sync overlay spans regular tracks only — not the error handler,
-  // which runs separately on abort. Track heights are dynamic now
-  // (switches/branches grow their row), so we sum the per-track
-  // computed heights instead of the old TRACK_H constant.
-  const tracksLayout = useMemo(
-    () => computeTracksLayout(scenario.tracks),
-    [scenario.tracks],
-  );
-  const regularTrackHeight = tracksLayout.totalHeight;
-
   const phaseLabel =
     execution.state.phase === 'running'
       ? '実行中'
@@ -610,6 +570,24 @@ export default function App() {
           }}
         />
         <div className="relative min-h-0 flex-1">
+          {editorMode.type === 'scenario' ? (
+            <Timeline
+              scenario={scenario}
+              blockStatus={blockStatus}
+              selectedBlockId={selected?.blockId ?? null}
+              running={playing}
+              onSelectBlock={(tid, bid) => handleBlockClick(tid, bid)}
+              onOpenBlock={(tid, bid) =>
+                setEditingBlock({ trackId: tid, blockId: bid })
+              }
+              onUpdateBlock={store.updateBlock}
+              onDeleteBlock={(tid, bid) => {
+                store.deleteBlock(tid, bid);
+                if (selected?.blockId === bid) setSelected(null);
+              }}
+              onDeleteSyncPoint={store.deleteSync}
+            />
+          ) : (
           <div className="fl-scroll absolute inset-0 overflow-auto">
           {editorMode.type === 'subroutine' && subroutineTrack && (
             <div className="flex items-center gap-2 border-b border-fl-border bg-fl-panel px-4 py-2">
@@ -641,151 +619,13 @@ export default function App() {
             </div>
           )}
 
-          <div className="relative" style={{ minWidth: canvasWidth }}>
-            {/* Ruler row */}
-            <div className="flex">
-              <div
-                className="flex-shrink-0 border-b border-r border-fl-border bg-fl-panel"
-                style={{ width: HEADER_W, height: RULER_H, borderRightWidth: 3 }}
-              />
-              <div className="relative flex-1 overflow-hidden">
-                <Ruler totalSlots={totalSlots} playheadSlot={-1} />
-              </div>
+          {subroutineTrack && (
+            <div className="px-4 py-4 font-mono text-[10px] text-fl-text-faint">
+              サブルーチン: {subroutineTrack.name} (暫定表示)
             </div>
-
-            {editorMode.type === 'scenario' ? (
-              <>
-                {/* Tracks */}
-                {scenario.tracks.map((track) => (
-                  <TrackRow
-                    key={track.id}
-                    track={track}
-                    totalSlots={totalSlots}
-                    blockStatus={blockStatus}
-                    currentSlot={currentSlotByTrack[track.id]}
-                    selectedBlockId={selected?.blockId ?? null}
-                    blocksDraggable={mode === 'block'}
-                    onRename={store.renameTrack}
-                    onDelete={store.deleteTrack}
-                    onUpdateBlock={store.updateBlock}
-                    onDeleteBlock={(tid, bid) => {
-                      store.deleteBlock(tid, bid);
-                      if (selected?.blockId === bid) setSelected(null);
-                    }}
-                    onSelectBlock={handleBlockClick}
-                    onCanvasClick={handleCanvasClick}
-                    onDoubleClickBlock={(tid, bid) =>
-                      setEditingBlock({ trackId: tid, blockId: bid })
-                    }
-                  />
-                ))}
-
-                {/* Add track row */}
-                <button
-                  type="button"
-                  onClick={store.addTrack}
-                  className="flex h-9 w-full cursor-pointer border-b border-dashed border-fl-border text-left"
-                >
-                  <div
-                    className="flex flex-shrink-0 items-center bg-fl-panel px-3"
-                    style={{
-                      width: HEADER_W,
-                      borderRight: '3px solid var(--fl-border)',
-                    }}
-                  >
-                    <span className="text-[9px] text-fl-text-ghost">
-                      + トラック追加
-                    </span>
-                  </div>
-                  <div className="flex-1 bg-fl-bg" />
-                </button>
-
-                {/* Error handler separator */}
-                <div
-                  className="flex items-center border-t border-b border-[#f43f5e33] bg-fl-error-panel px-3"
-                  style={{ height: ERROR_DIVIDER_H }}
-                >
-                  <span className="font-mono text-[9px] tracking-wider text-[#f43f5e]">
-                    ⚠ SCENARIO ERROR HANDLER
-                  </span>
-                  <span className="ml-3 font-mono text-[8px] text-[#f43f5e99]">
-                    abort 発火時にのみ実行されるクリーンアップトラック
-                  </span>
-                </div>
-
-                {/* Error handler track */}
-                <TrackRow
-                  track={scenario.errorHandler}
-                  totalSlots={totalSlots}
-                  blockStatus={blockStatus}
-                  currentSlot={currentSlotByTrack[ERROR_HANDLER_ID]}
-                  selectedBlockId={selected?.blockId ?? null}
-                  blocksDraggable={mode === 'block'}
-                  variant="error"
-                  onRename={store.renameTrack}
-                  onDelete={store.deleteTrack}
-                  onUpdateBlock={store.updateBlock}
-                  onDeleteBlock={(tid, bid) => {
-                    store.deleteBlock(tid, bid);
-                    if (selected?.blockId === bid) setSelected(null);
-                  }}
-                  onSelectBlock={handleBlockClick}
-                  onCanvasClick={handleCanvasClick}
-                  onDoubleClickBlock={() => {/* error handler blocks don't open flowchart editor */}}
-                />
-
-                {/* Sync overlay + global playhead */}
-                <div
-                  className="pointer-events-none absolute"
-                  style={{
-                    top: RULER_H,
-                    left: HEADER_W,
-                    width: totalSlots * SLOT_PX,
-                    height: regularTrackHeight,
-                    zIndex: 9,
-                  }}
-                >
-                  {scenario.syncPoints.map((sp) => (
-                    <div key={sp.id} className="pointer-events-auto">
-                      <SyncLine
-                        sp={sp}
-                        trackHeights={tracksLayout.perTrack.map(t => t.trackHeight)}
-                        trackTops={tracksLayout.trackTops}
-                        totalHeight={regularTrackHeight}
-                        onDelete={store.deleteSync}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              subroutineTrack && (
-                <>
-                  <TrackRow
-                    track={subroutineTrack}
-                    totalSlots={totalSlots}
-                    blockStatus={blockStatus}
-                    currentSlot={currentSlotByTrack[subroutineTrack.id]}
-                    selectedBlockId={selected?.blockId ?? null}
-                    blocksDraggable={mode === 'block'}
-                    onRename={(id, name) => store.renameSubroutine(id, name)}
-                    onDelete={() => {
-                      /* subroutine sidebar handles delete */
-                    }}
-                    onUpdateBlock={store.updateBlock}
-                    onDeleteBlock={(tid, bid) => {
-                      store.deleteBlock(tid, bid);
-                      if (selected?.blockId === bid) setSelected(null);
-                    }}
-                    onSelectBlock={handleBlockClick}
-                    onCanvasClick={handleCanvasClick}
-                    onDoubleClickBlock={() => {/* subroutine blocks don't open flowchart editor in this phase */}}
-                  />
-                </>
-              )
-            )}
+          )}
           </div>
-          </div>
+          )}
           <FloatingToolbox
             mode={mode}
             onModeChange={setMode}

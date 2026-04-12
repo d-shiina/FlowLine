@@ -71,6 +71,12 @@ export interface Block {
   timeout?: number;
   /** Error handling policy for the whole task. Undefined = abort. */
   onError?: OnError;
+  /**
+   * Error-handler-only: run this cleanup block if the error occurred at
+   * or after this slot. Enables slot-aware cleanup (stack-unwind style).
+   * Applied only to blocks in the scenario's errorHandler track.
+   */
+  catchSlot?: number;
 }
 
 export interface Track {

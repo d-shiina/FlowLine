@@ -115,3 +115,8 @@ body {
 .fl-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--fl-border-strong);
 }
+
+@keyframes flowline-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}

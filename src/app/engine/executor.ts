@@ -75,6 +75,8 @@ export class Executor {
   private aborted = false;
   private waiters: Waiter[] = [];
   private logId = 0;
+  /** Slot at which the error that caused abort occurred (for slot-aware cleanup). */
+  private errorSlot: number | null = null;
   /**
    * Mutable variable store for the run. Seeded from
    * `scenario.variables.scenario` so authors can set initial values in
@@ -852,7 +854,28 @@ export class Executor {
   }
 
   private async runErrorHandler(track: Track): Promise<void> {
-    const sorted = track.blocks.slice().sort((a, b) => a.slot - b.slot);
+    // Slot-aware cleanup (stack-unwind style):
+    // - Only run blocks whose catchSlot (or their slot) is at or before
+    //   the slot where the error occurred.
+    // - Run in reverse slot order (deepest cleanup first).
+    // - If errorSlot is null, fall back to running all blocks in forward order.
+    const errSlot = this.errorSlot;
+    const blocks = track.blocks.slice();
+    let sorted: Block[];
+    if (errSlot !== null) {
+      sorted = blocks
+        .filter((b) => (b.catchSlot ?? b.slot) <= errSlot)
+        .sort((a, b) => b.slot - a.slot); // reverse
+      this.log(
+        'info',
+        undefined,
+        undefined,
+        `エラーハンドラ: slot ${errSlot} で発生 → ${sorted.length} 個のクリーンアップを逆順実行`,
+      );
+    } else {
+      sorted = blocks.sort((a, b) => a.slot - b.slot);
+    }
+
     for (const block of sorted) {
       // Error handler forces onError = skip (see docs/02-error-handling.md)
       // so a cleanup failure never re-escalates.
@@ -979,11 +1002,14 @@ export class Executor {
       }
       // abort
       this.state.status[node.id] = 'error';
+      // Capture the slot at which the error occurred for slot-aware cleanup.
+      const errSlot = this.state.currentSlot[trackId];
+      if (errSlot !== undefined) this.errorSlot = errSlot;
       this.log(
         'error',
         trackId,
         node.id,
-        'onError=abort → シナリオ全体を中止',
+        `onError=abort → シナリオ全体を中止 (slot ${this.errorSlot ?? '?'})`,
       );
       this.flush();
       this.abort();
