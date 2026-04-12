@@ -318,10 +318,19 @@ export function FlowchartStepView({
   );
 }
 
+/** Horizontal connector arrow between steps. */
 export function StepConnector() {
   return (
-    <div className="flex w-[320px] justify-center">
-      <div className="h-4 w-0.5" style={{ background: 'var(--fl-border)' }} />
+    <div className="flex flex-shrink-0 items-center self-center px-1">
+      <div className="h-0.5 w-4" style={{ background: 'var(--fl-border)' }} />
+      <div
+        className="h-0 w-0"
+        style={{
+          borderTop: '3px solid transparent',
+          borderBottom: '3px solid transparent',
+          borderLeft: '4px solid var(--fl-border)',
+        }}
+      />
     </div>
   );
 }

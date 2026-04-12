@@ -352,13 +352,13 @@ export function FlowchartEditor({
         >
           <div
             ref={listRef}
-            className="fl-scroll flex-1 overflow-y-auto"
+            className="fl-scroll flex-1 overflow-auto"
             onClick={() => setSelectedIds([])}
           >
-            <div className="flex flex-col items-center gap-0 px-8 py-6">
+            <div className="flex min-h-full items-start gap-0 px-6 py-6">
               {/* Track label */}
               <div
-                className="mb-4 flex items-center gap-2 font-mono text-[10px] font-bold"
+                className="mr-4 flex flex-shrink-0 items-center gap-2 self-center font-mono text-[10px] font-bold"
                 style={{ color: trackColor }}
               >
                 <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: trackColor }} />
@@ -366,16 +366,16 @@ export function FlowchartEditor({
               </div>
 
               {topLevelSteps.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-fl-border-strong bg-fl-panel-2 px-6 py-4 text-center font-mono text-[10px] text-fl-text-faint">
+                <div className="self-center rounded-lg border border-dashed border-fl-border-strong bg-fl-panel-2 px-6 py-4 text-center font-mono text-[10px] text-fl-text-faint">
                   まだステップがありません
                 </div>
               ) : (
                 topLevelSteps.map((step, i) => (
-                  <div key={step.id} className="flex flex-col items-center" data-step-id={step.id}>
+                  <div key={step.id} className="flex flex-shrink-0 items-start" data-step-id={step.id}>
                     {i > 0 && <StepConnector />}
                     {/* Drop insert indicator */}
                     {dropInsertIndex === i && dragStepId !== step.id && (
-                      <div className="mb-1 h-[3px] w-[240px] rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
+                      <div className="mr-1 w-[3px] self-stretch rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
                     )}
                     {step.type === 'group' ? (
                       <div data-group-id={step.id}>
@@ -417,7 +417,7 @@ export function FlowchartEditor({
 
               {/* Drop at end indicator */}
               {dropInsertIndex === topLevelSteps.length && (
-                <div className="mt-1 h-[3px] w-[240px] rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
+                <div className="ml-1 w-[3px] self-stretch rounded-full bg-[#3b82f6]" style={{ boxShadow: '0 0 8px #3b82f6aa' }} />
               )}
 
               {/* Add button */}
@@ -429,9 +429,9 @@ export function FlowchartEditor({
                   setAddStepParent(undefined);
                   setAddStepOpen(true);
                 }}
-                className="rounded-lg border border-dashed border-fl-border-strong bg-transparent px-4 py-2 font-mono text-[10px] text-fl-text-faint transition-colors hover:border-[#3b82f6] hover:text-[#3b82f6]"
+                className="flex-shrink-0 self-center rounded-lg border border-dashed border-fl-border-strong bg-transparent px-3 py-2 font-mono text-[10px] text-fl-text-faint transition-colors hover:border-[#3b82f6] hover:text-[#3b82f6]"
               >
-                + ステップ追加
+                + 追加
               </button>
             </div>
           </div>
