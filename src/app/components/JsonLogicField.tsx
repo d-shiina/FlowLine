@@ -4,27 +4,105 @@ import { formatLiteral, parseLiteral } from '../valueLiteral';
 import { Select, type SelectOption } from './ui/Select';
 
 /**
- * GUI for assembling a JSON Logic condition used by loop
- * (``whileCondition``) and branch (``condition``) blocks.
+ * Unified JSON Logic editor used by every FLOWLINE surface that
+ * stores an expression on a block (branch condition, loop while
+ * condition, switch expression). Two primary modes:
  *
- * Design:
+ * - ``comparison`` — row-based binary comparison builder used by
+ *   branch/loop conditions. Each row is a single ``left <op> right``
+ *   with var/literal operands; multiple rows compose with AND / OR.
+ *   When the current value doesn't match this row schema (nested
+ *   ops, ``cat``, ``in``, etc.) the component falls back to the
+ *   raw JSON textarea automatically.
  *
- * - **Row-based comparisons**. Each row is a single binary
- *   comparison (``left <op> right``). Operands are either a
- *   scenario variable (picked from a datalist of known keys) or
- *   a literal value parsed by the shared ``valueLiteral`` helper
- *   (so ``42`` → number, ``true`` → bool, ``hello`` → string).
- * - **AND / OR combinator** at the top level. With one row the
- *   combinator is invisible; with two or more rows, a pill
- *   lets the user toggle how they're joined.
- * - **Raw JSON fallback**. Not every JSON Logic expression
- *   fits the rows schema (nested ops, `if`/`in`/etc.). The
- *   builder detects that on mount and auto-switches to a
- *   textarea with parse-error reporting. A "raw" toggle lets
- *   the user opt out of the GUI deliberately.
- * - The generated expression is round-trip lossless for any
- *   value the builder itself could have produced.
+ * - ``value`` — single-line variable picker used by switch
+ *   expressions. The typical case is ``{ "var": "scenario.status" }``
+ *   so a simple text input with a datalist of scenario keys covers
+ *   it in one interaction. Same raw-JSON fallback for anything
+ *   more complex.
+ *
+ * The raw mode is shared by both, and users can always force raw
+ * with the ``詳細 ›`` toggle (or return to the builder with
+ * ``‹ builder`` when the expression is compatible).
  */
+
+type Mode = 'comparison' | 'value';
+
+interface Props {
+  value: unknown;
+  onChange: (next: unknown) => void;
+  scenarioVariables: Record<string, unknown>;
+  /** Which primary editor to show. Defaults to ``comparison``. */
+  mode?: Mode;
+  /** Extra variable keys to offer in pickers (e.g. live track.* keys). */
+  extraVariableKeys?: string[];
+  /** Placeholder label shown on the empty-state form. */
+  placeholder?: string;
+}
+
+export function JsonLogicField({
+  value,
+  onChange,
+  scenarioVariables,
+  mode = 'comparison',
+  extraVariableKeys = [],
+  placeholder,
+}: Props) {
+  const knownVarKeys = useMemo(() => {
+    const keys = new Set<string>(extraVariableKeys);
+    for (const k of Object.keys(scenarioVariables)) {
+      keys.add(`scenario.${k}`);
+    }
+    return Array.from(keys).sort();
+  }, [scenarioVariables, extraVariableKeys]);
+
+  // Try to parse the incoming value into whichever builder schema
+  // matches the current mode. Null means the value doesn't fit,
+  // so we drop into raw mode.
+  const parsed = useMemo(
+    () =>
+      mode === 'comparison'
+        ? tryParseComparison(value)
+        : tryParseValueMode(value),
+    [value, mode],
+  );
+  const [rawForced, setRawForced] = useState(false);
+  const raw = parsed === null || rawForced;
+
+  if (raw) {
+    return (
+      <RawMode
+        value={value}
+        onChange={onChange}
+        canSwitchToBuilder={parsed !== null}
+        onSwitchToBuilder={() => setRawForced(false)}
+      />
+    );
+  }
+
+  if (mode === 'comparison') {
+    return (
+      <ComparisonMode
+        state={parsed as BuilderState}
+        onChange={(nextState) => onChange(serializeComparison(nextState))}
+        knownVarKeys={knownVarKeys}
+        onForceRaw={() => setRawForced(true)}
+        placeholder={placeholder}
+      />
+    );
+  }
+
+  return (
+    <ValueMode
+      state={parsed as ValueState}
+      onChange={(nextState) => onChange(serializeValue(nextState))}
+      knownVarKeys={knownVarKeys}
+      onForceRaw={() => setRawForced(true)}
+    />
+  );
+}
+
+// ── Comparison (row-based) primary mode ──────────────────────────
 
 type ComparisonOp = '==' | '!=' | '<' | '<=' | '>' | '>=' | 'in';
 
@@ -61,65 +139,7 @@ interface BuilderState {
   rows: Row[];
 }
 
-interface Props {
-  value: unknown;
-  onChange: (next: unknown) => void;
-  scenarioVariables: Record<string, unknown>;
-  /** Extra variable keys to offer in the picker (e.g. live track.* keys). */
-  extraVariableKeys?: string[];
-  /** Placeholder label shown on the empty-state form. */
-  placeholder?: string;
-}
-
-export function ConditionBuilder({
-  value,
-  onChange,
-  scenarioVariables,
-  extraVariableKeys = [],
-  placeholder,
-}: Props) {
-  // Parse the incoming expression into rows on mount. If it
-  // doesn't fit the schema, drop into raw mode with the JSON
-  // serialised into the textarea.
-  const parsed = useMemo(() => tryParse(value), [value]);
-  const [rawForced, setRawForced] = useState(false);
-  const raw = parsed === null || rawForced;
-
-  // Known variable keys for the var picker datalist.
-  const knownVarKeys = useMemo(() => {
-    const keys = new Set<string>(extraVariableKeys);
-    for (const k of Object.keys(scenarioVariables)) {
-      keys.add(`scenario.${k}`);
-    }
-    return Array.from(keys).sort();
-  }, [scenarioVariables, extraVariableKeys]);
-
-  if (raw) {
-    return (
-      <RawMode
-        value={value}
-        onChange={onChange}
-        canSwitchToBuilder={parsed !== null}
-        onSwitchToBuilder={() => setRawForced(false)}
-        onForceRaw={() => setRawForced(true)}
-      />
-    );
-  }
-
-  return (
-    <BuilderMode
-      state={parsed}
-      onChange={(nextState) => onChange(serialize(nextState))}
-      knownVarKeys={knownVarKeys}
-      onForceRaw={() => setRawForced(true)}
-      placeholder={placeholder}
-    />
-  );
-}
-
-// ── Builder UI ────────────────────────────────────────────────────
-
-interface BuilderModeProps {
+interface ComparisonModeProps {
   state: BuilderState;
   onChange: (next: BuilderState) => void;
   knownVarKeys: string[];
@@ -127,13 +147,13 @@ interface BuilderModeProps {
   placeholder?: string;
 }
 
-function BuilderMode({
+function ComparisonMode({
   state,
   onChange,
   knownVarKeys,
   onForceRaw,
   placeholder,
-}: BuilderModeProps) {
+}: ComparisonModeProps) {
   const { combinator, rows } = state;
 
   const updateRow = (idx: number, next: Row) => {
@@ -144,17 +164,11 @@ function BuilderMode({
   };
 
   const addRow = () => {
-    onChange({
-      combinator,
-      rows: [...rows, defaultRow()],
-    });
+    onChange({ combinator, rows: [...rows, defaultRow()] });
   };
 
   const deleteRow = (idx: number) => {
-    onChange({
-      combinator,
-      rows: rows.filter((_, i) => i !== idx),
-    });
+    onChange({ combinator, rows: rows.filter((_, i) => i !== idx) });
   };
 
   const setCombinator = (next: Combinator) => {
@@ -345,14 +359,79 @@ function OperandEditor({ operand, knownVarKeys, onChange }: OperandEditorProps) 
   );
 }
 
-// ── Raw JSON fallback ────────────────────────────────────────────
+// ── Value (single operand) primary mode ─────────────────────────
+
+interface ValueState {
+  /** When set, the value is a ``{ var: key }`` reference. */
+  varKey: string | null;
+}
+
+interface ValueModeProps {
+  state: ValueState;
+  onChange: (next: ValueState) => void;
+  knownVarKeys: string[];
+  onForceRaw: () => void;
+}
+
+function ValueMode({
+  state,
+  onChange,
+  knownVarKeys,
+  onForceRaw,
+}: ValueModeProps) {
+  const [local, setLocal] = useState(state.varKey ?? '');
+
+  // Resync on external value identity changes.
+  useEffect(() => {
+    setLocal(state.varKey ?? '');
+  }, [state.varKey]);
+
+  const commit = () => {
+    const trimmed = local.trim();
+    onChange({ varKey: trimmed === '' ? null : trimmed });
+  };
+
+  const datalistId = useMemo(
+    () => `jsonlogic-value-${Math.random().toString(36).slice(2, 8)}`,
+    [],
+  );
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        placeholder="scenario.xxx"
+        list={datalistId}
+        className="min-w-0 flex-1 rounded border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none focus:border-[#3b82f6]"
+      />
+      <datalist id={datalistId}>
+        {knownVarKeys.map((k) => (
+          <option key={k} value={k} />
+        ))}
+      </datalist>
+      <button
+        type="button"
+        onClick={onForceRaw}
+        className="flex-shrink-0 font-mono text-[8px] text-fl-text-ghost hover:text-fl-text-faint"
+        title="JSON Logic 式を直接編集"
+      >
+        詳細 ›
+      </button>
+    </div>
+  );
+}
+
+// ── Raw JSON fallback (shared) ───────────────────────────────────
 
 interface RawModeProps {
   value: unknown;
   onChange: (next: unknown) => void;
   canSwitchToBuilder: boolean;
   onSwitchToBuilder: () => void;
-  onForceRaw: () => void;
 }
 
 function RawMode({
@@ -365,9 +444,7 @@ function RawMode({
   const [local, setLocal] = useState(initial);
   const [error, setError] = useState<string | null>(null);
 
-  // Resync when the external value identity changes.
-  const syncKey = initial;
-  useMemoSync(syncKey, () => {
+  useKeyChangeEffect(initial, () => {
     setLocal(initial);
     setError(null);
   });
@@ -424,7 +501,12 @@ function RawMode({
   );
 }
 
-function useMemoSync(key: string, effect: () => void): void {
+/**
+ * Fire `effect` only when `key` changes between renders, so the raw
+ * textarea resyncs when an external value update arrives but never
+ * fights the user's in-progress typing.
+ */
+function useKeyChangeEffect(key: string, effect: () => void): void {
   const prev = useRef<string | null>(null);
   useEffect(() => {
     if (prev.current !== key) {
@@ -456,16 +538,12 @@ function defaultRow(): Row {
 }
 
 /**
- * Attempt to parse a JSON Logic expression into the builder's
- * row model. Returns null when the shape isn't supported (raw
- * fallback is used in that case). ``undefined`` produces an empty
- * builder.
+ * Try to parse a JSON Logic value into the comparison-row schema.
+ * Returns null when the expression has nested ops or non-supported
+ * operators so the caller drops into raw mode.
  */
-function tryParse(value: unknown): BuilderState | null {
-  if (value === undefined) {
-    return { combinator: 'and', rows: [] };
-  }
-  // Top-level and/or of comparisons.
+function tryParseComparison(value: unknown): BuilderState | null {
+  if (value === undefined) return { combinator: 'and', rows: [] };
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     const keys = Object.keys(value as Record<string, unknown>);
     if (keys.length === 1 && (keys[0] === 'and' || keys[0] === 'or')) {
@@ -480,7 +558,6 @@ function tryParse(value: unknown): BuilderState | null {
       return { combinator: keys[0] as Combinator, rows };
     }
   }
-  // Single comparison.
   const single = parseRow(value);
   if (single) return { combinator: 'and', rows: [single] };
   return null;
@@ -513,8 +590,6 @@ function parseOperand(expr: unknown): Operand | null {
     }
     return null;
   }
-  // Primitive literal — feed into the shared formatter so the
-  // editor display matches VariablesModal semantics.
   return {
     kind: 'literal',
     varKey: '',
@@ -522,7 +597,7 @@ function parseOperand(expr: unknown): Operand | null {
   };
 }
 
-function serialize(state: BuilderState): unknown {
+function serializeComparison(state: BuilderState): unknown {
   if (state.rows.length === 0) return undefined;
   const parts = state.rows.map(serializeRow);
   if (parts.length === 1) return parts[0];
@@ -536,8 +611,31 @@ function serializeRow(row: Row): unknown {
 }
 
 function serializeOperand(op: Operand): unknown {
-  if (op.kind === 'var') {
-    return { var: op.varKey };
-  }
+  if (op.kind === 'var') return { var: op.varKey };
   return parseLiteral(op.literalRaw);
+}
+
+/**
+ * Try to parse a JSON Logic value into the value-mode schema
+ * (single ``{ var: "..." }`` reference). Returns null for
+ * anything more complex so the caller drops into raw mode.
+ */
+function tryParseValueMode(value: unknown): ValueState | null {
+  if (value === undefined) return { varKey: null };
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value as Record<string, unknown>).length === 1 &&
+    (value as Record<string, unknown>).var !== undefined
+  ) {
+    const key = (value as { var: unknown }).var;
+    if (typeof key === 'string') return { varKey: key };
+  }
+  return null;
+}
+
+function serializeValue(state: ValueState): unknown {
+  if (state.varKey === null) return undefined;
+  return { var: state.varKey };
 }

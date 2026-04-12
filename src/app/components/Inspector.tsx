@@ -3,7 +3,7 @@ import type { Block, OnError, PortBinding } from '../types';
 import { BLOCK_META } from '../types';
 import type { NodeManifestEntry, NodePortDef } from '../../globals';
 import { formatLiteral, parseLiteral } from '../valueLiteral';
-import { ConditionBuilder } from './ConditionBuilder';
+import { JsonLogicField } from './JsonLogicField';
 import { Select, type SelectOption } from './ui/Select';
 import { Checkbox } from './ui/Checkbox';
 
@@ -566,7 +566,8 @@ function LoopParamsSection({
         </>
       ) : (
         <>
-          <ConditionBuilder
+          <JsonLogicField
+            mode="comparison"
             value={params.whileCondition}
             scenarioVariables={scenarioVariables}
             placeholder="真の間くりかえし"
@@ -603,10 +604,9 @@ interface BranchParamsProps {
 }
 
 /**
- * Branch condition editor — now backed by ConditionBuilder. The
- * user typically constructs their condition visually, but
- * arbitrarily complex JSON Logic expressions can still be authored
- * via the raw textarea fallback inside the builder.
+ * Branch condition editor — backed by JsonLogicField in comparison
+ * mode. The user builds the condition as rows of binary comparisons
+ * and the component falls back to raw JSON for anything more complex.
  */
 function BranchParamsSection({
   block,
@@ -619,7 +619,8 @@ function BranchParamsSection({
   return (
     <div className="flex flex-col gap-1">
       <span className="font-mono text-[9px] text-fl-text-faint">条件</span>
-      <ConditionBuilder
+      <JsonLogicField
+        mode="comparison"
         value={current}
         scenarioVariables={scenarioVariables}
         onChange={(next) => {
@@ -642,154 +643,6 @@ function BranchParamsSection({
   );
 }
 
-interface SwitchExpressionEditorProps {
-  value: unknown;
-  scenarioVariables: Record<string, unknown>;
-  onChange: (next: unknown) => void;
-}
-
-/**
- * Compact editor for a switch's evaluation expression. The common
- * case is a plain variable reference (``{ var: "scenario.status" }``),
- * so the default mode is a single-line text input with a datalist
- * of scenario variable keys — the user types ``scenario.status`` and
- * the widget serialises to the right JSON Logic shape.
- *
- * A 詳細 toggle exposes a raw JSON textarea for arbitrary
- * expressions (arithmetic, nested ops) that don't fit the simple
- * var shape. Switching modes preserves the current value whenever
- * possible.
- */
-function SwitchExpressionEditor({
-  value,
-  scenarioVariables,
-  onChange,
-}: SwitchExpressionEditorProps) {
-  // Detect whether the current value is a simple var reference.
-  // Everything else forces raw mode on mount.
-  const asVar =
-    value &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    Object.keys(value as Record<string, unknown>).length === 1 &&
-    (value as Record<string, unknown>).var !== undefined
-      ? String((value as { var: unknown }).var)
-      : null;
-  const canBuildMode = asVar !== null || value === undefined;
-  const [rawForced, setRawForced] = useState(!canBuildMode);
-  const raw = rawForced || !canBuildMode;
-
-  const [localVar, setLocalVar] = useState(asVar ?? '');
-  const [localRaw, setLocalRaw] = useState(
-    value === undefined ? '' : JSON.stringify(value, null, 2),
-  );
-  const [rawError, setRawError] = useState<string | null>(null);
-
-  // Resync when the external value changes identity.
-  const identity = JSON.stringify(value ?? null);
-  useEffect(() => {
-    setLocalVar(asVar ?? '');
-    setLocalRaw(value === undefined ? '' : JSON.stringify(value, null, 2));
-    setRawError(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity]);
-
-  const knownKeys = Object.keys(scenarioVariables)
-    .sort()
-    .map((k) => `scenario.${k}`);
-
-  const commitVar = () => {
-    const trimmed = localVar.trim();
-    if (trimmed === '') {
-      onChange(undefined);
-      return;
-    }
-    onChange({ var: trimmed });
-  };
-
-  const commitRaw = () => {
-    const trimmed = localRaw.trim();
-    if (trimmed === '') {
-      onChange(undefined);
-      setRawError(null);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      onChange(parsed);
-      setRawError(null);
-    } catch (e) {
-      setRawError((e as Error).message);
-    }
-  };
-
-  if (raw) {
-    return (
-      <div className="flex flex-col gap-1">
-        <textarea
-          value={localRaw}
-          onChange={(e) => setLocalRaw(e.target.value)}
-          onBlur={commitRaw}
-          spellCheck={false}
-          rows={3}
-          placeholder='{ "var": "scenario.status" }'
-          className="resize-none rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[10px] leading-relaxed text-fl-text outline-none"
-        />
-        <div className="flex items-center justify-between gap-2">
-          {rawError ? (
-            <span className="flex-1 font-mono text-[9px] text-[#ef4444]">
-              {rawError}
-            </span>
-          ) : (
-            <span className="flex-1 font-mono text-[8px] text-fl-text-ghost">
-              生の JSON Logic 式を入力
-            </span>
-          )}
-          {canBuildMode && (
-            <button
-              type="button"
-              onClick={() => setRawForced(false)}
-              className="font-mono text-[8px] text-fl-text-ghost hover:text-fl-text-faint"
-            >
-              ‹ シンプル
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const datalistId = 'switch-expr-vars';
-  return (
-    <div className="flex items-center gap-1">
-      <input
-        value={localVar}
-        onChange={(e) => setLocalVar(e.target.value)}
-        onBlur={commitVar}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-        }}
-        placeholder="scenario.xxx"
-        list={datalistId}
-        className="min-w-0 flex-1 rounded border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none focus:border-[#3b82f6]"
-      />
-      <datalist id={datalistId}>
-        {knownKeys.map((k) => (
-          <option key={k} value={k} />
-        ))}
-      </datalist>
-      <button
-        type="button"
-        onClick={() => setRawForced(true)}
-        className="flex-shrink-0 font-mono text-[8px] text-fl-text-ghost hover:text-fl-text-faint"
-        title="JSON Logic 式を直接編集"
-      >
-        詳細 ›
-      </button>
-    </div>
-  );
-}
-
 interface SwitchParamsProps {
   block: Block;
   scenarioVariables: Record<string, unknown>;
@@ -804,13 +657,12 @@ interface SwitchParamsProps {
  * winning case from ``params.cases`` (string[]). A conventional
  * ``"default"`` entry acts as the fallback.
  *
- * The UI gives you a ConditionBuilder-free expression editor (raw
- * JSON textarea — most switches key off a single ``{ "var": "..." }``
- * so a full ConditionBuilder is overkill here) and a case list
- * you can add/rename/reorder/remove. Deleting a case cleans up
- * ``parentBranch`` on children through the same onChange call site
- * so orphaned lanes can't survive a rename. The first case in the
- * list becomes the default lane new children land on.
+ * The expression editor uses JsonLogicField in value mode — most
+ * switches key off a single ``{ var: "..." }`` reference, and the
+ * raw JSON fallback handles more exotic expressions. The case list
+ * lets you add / rename / delete case labels; the first case in
+ * the list is the default lane new children land on, and
+ * ``"default"`` is treated specially by the executor as a fallback.
  */
 function SwitchParamsSection({
   block,
@@ -874,7 +726,8 @@ function SwitchParamsSection({
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-col gap-1">
         <span className="font-mono text-[9px] text-fl-text-faint">評価式</span>
-        <SwitchExpressionEditor
+        <JsonLogicField
+          mode="value"
           value={params.expression}
           scenarioVariables={scenarioVariables}
           onChange={commitExpression}
