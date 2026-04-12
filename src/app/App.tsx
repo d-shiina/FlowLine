@@ -224,34 +224,39 @@ export default function App() {
     const scenarioApi = window.flowlineScenario;
     if (scenarioApi) {
       // Native .fls export via Electron main process.
-      const usedNodeIds = new Set<string>();
-      const collectFromBlocks = (blocks: Block[]) => {
-        for (const b of blocks) {
-          for (const s of b.steps) {
-            if (s.nodeId) usedNodeIds.add(s.nodeId);
+      try {
+        const usedNodeIds = new Set<string>();
+        const collectFromBlocks = (blocks: Block[]) => {
+          for (const b of blocks) {
+            for (const s of b.steps) {
+              if (s.nodeId) usedNodeIds.add(s.nodeId);
+            }
           }
-        }
-      };
-      for (const t of scenario.tracks) collectFromBlocks(t.blocks);
-      collectFromBlocks(scenario.errorHandler.blocks);
-      for (const sub of scenario.subroutines) collectFromBlocks(sub.blocks);
+        };
+        for (const t of scenario.tracks) collectFromBlocks(t.blocks);
+        collectFromBlocks(scenario.errorHandler.blocks);
+        for (const sub of scenario.subroutines) collectFromBlocks(sub.blocks);
 
-      await scenarioApi.exportFile(
-        JSON.stringify(scenario),
-        [...usedNodeIds],
-        nodeManifest,
-      );
-      return;
+        const result = await scenarioApi.exportFile(
+          JSON.stringify(scenario),
+          [...usedNodeIds],
+          nodeManifest,
+        );
+        if (result.ok) return;
+        // Fall through to JSON fallback on error.
+      } catch {
+        // Fall through to JSON fallback.
+      }
     }
 
-    // Fallback: browser-only JSON export (no node embedding).
+    // Fallback: JSON export (works in any environment).
     const blob = new Blob([JSON.stringify(scenario, null, 2)], {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${scenario.name || 'flowline-scenario'}.fls.json`;
+    a.download = `${scenario.name || 'flowline-scenario'}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, [scenario, nodeManifest]);
@@ -259,29 +264,37 @@ export default function App() {
   const handleImport = useCallback(async () => {
     const scenarioApi = window.flowlineScenario;
     if (scenarioApi) {
-      // Native .fls import via Electron main process.
-      const result = await scenarioApi.importFile();
-      if (!result.ok || !result.scenario) return;
-
-      // Reload manifest if nodes were installed/updated.
-      if (
-        result.installedNodes.length > 0 ||
-        result.updatedNodes.length > 0
-      ) {
-        const runtime = window.flowlineRuntime;
-        if (runtime) {
-          try {
-            const reload = await runtime.reloadNodes();
-            if (reload.ok) setNodeManifest(reload.manifest);
-          } catch {
-            // Will pick up on next worker restart.
+      try {
+        // Native .fls import via Electron main process.
+        const result = await scenarioApi.importFile();
+        if (!result.ok) {
+          // User cancelled or error — fall through if error.
+          if (!result.error) return;
+          // Fall through to browser file picker on error.
+        } else if (result.scenario) {
+          // Reload manifest if nodes were installed/updated.
+          if (
+            result.installedNodes.length > 0 ||
+            result.updatedNodes.length > 0
+          ) {
+            const runtime = window.flowlineRuntime;
+            if (runtime) {
+              try {
+                const reload = await runtime.reloadNodes();
+                if (reload.ok) setNodeManifest(reload.manifest);
+              } catch {
+                // Will pick up on next worker restart.
+              }
+            }
           }
-        }
-      }
 
-      store.replace(result.scenario as Scenario);
-      setSelected(null);
-      return;
+          store.replace(result.scenario as Scenario);
+          setSelected(null);
+          return;
+        }
+      } catch {
+        // Fall through to browser file picker.
+      }
     }
 
     // Fallback: browser file picker.
