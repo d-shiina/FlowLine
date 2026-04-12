@@ -8,6 +8,8 @@ import {
   Package,
   Plus,
   Trash2,
+  Copy,
+  ClipboardCheck,
 } from 'lucide-react';
 import type { ExecutionPhase, LogEntry } from '../engine';
 import type { Track } from '../types';
@@ -281,9 +283,42 @@ function LogTabContent({
   setShowFilter: (v: boolean) => void;
   scrollRef: React.RefObject<HTMLDivElement>;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  const formatLogLine = useCallback(
+    (log: LogEntry) => {
+      const time = formatTime(log.time);
+      const level = log.level.toUpperCase().padEnd(5);
+      const track = log.trackId ? trackMap.get(log.trackId)?.name : undefined;
+      return track
+        ? `${time} ${level} [${track}] ${log.message}`
+        : `${time} ${level} ${log.message}`;
+    },
+    [trackMap],
+  );
+
+  const handleCopyAll = useCallback(() => {
+    const text = logs.map(formatLogLine).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [logs, formatLogLine]);
+
+  const handleCopySelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (sel && sel.toString().trim()) {
+      navigator.clipboard.writeText(sel.toString());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      handleCopyAll();
+    }
+  }, [handleCopyAll]);
+
   return (
     <>
-      {/* Filter toolbar */}
+      {/* Filter + copy toolbar */}
       <div className="flex items-center gap-2 border-b border-fl-border px-5 py-1">
         <button
           type="button"
@@ -330,12 +365,32 @@ function LogTabContent({
             })}
           </>
         )}
+
+        {/* Copy buttons */}
+        <div className="ml-auto flex items-center gap-1">
+          {copied ? (
+            <span className="flex items-center gap-1 font-mono text-[9px] text-[#22c55e]">
+              <ClipboardCheck className="h-2.5 w-2.5" /> コピーしました
+            </span>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleCopySelection}
+                className="flex items-center gap-1 rounded px-1.5 py-px font-mono text-[9px] text-fl-text-faint transition-colors hover:text-fl-text"
+                title="選択範囲をコピー (選択なしなら全件)"
+              >
+                <Copy className="h-2.5 w-2.5" /> コピー
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Log lines */}
+      {/* Log lines — user-select enabled for text selection */}
       <div
         ref={scrollRef}
-        className="fl-scroll max-h-48 min-h-20 overflow-auto px-5 py-2"
+        className="fl-scroll max-h-48 min-h-20 select-text overflow-auto px-5 py-2"
       >
         {logs.length === 0 ? (
           <div className="font-mono text-[10px] text-fl-text-ghost">（空）</div>
