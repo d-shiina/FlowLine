@@ -11,6 +11,8 @@ interface Props {
   onDelete: (stepId: string) => void;
   /** Called on mousedown to let the parent start a drag. */
   onDragStart?: (stepId: string, e: React.MouseEvent) => void;
+  /** Run this single step. */
+  onRunStep?: (stepId: string) => void;
 }
 
 /**
@@ -26,6 +28,7 @@ export function FlowchartStepView({
   onSelect,
   onDelete,
   onDragStart,
+  onRunStep,
 }: Props) {
   const [hov, setHov] = useState(false);
   const meta = STEP_META[step.type];
@@ -141,19 +144,35 @@ export function FlowchartStepView({
         </span>
       )}
 
-      {/* Delete button on hover */}
+      {/* Hover action buttons */}
       {hov && (
-        <button
-          type="button"
-          className="absolute right-1.5 top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[9px] text-white"
-          onMouseDown={(e) => {
-            e.stopPropagation();
-            onDelete(step.id);
-          }}
-          aria-label="削除"
-        >
-          x
-        </button>
+        <div className="absolute right-1.5 top-1.5 flex gap-0.5">
+          {onRunStep && (
+            <button
+              type="button"
+              className="flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] text-white"
+              style={{ background: '#22c55e' }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                onRunStep(step.id);
+              }}
+              aria-label="実行"
+            >
+              ▶
+            </button>
+          )}
+          <button
+            type="button"
+            className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[9px] text-white"
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              onDelete(step.id);
+            }}
+            aria-label="削除"
+          >
+            x
+          </button>
+        </div>
       )}
     </div>
   );

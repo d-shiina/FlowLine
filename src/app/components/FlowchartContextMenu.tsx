@@ -16,6 +16,11 @@ interface Props {
   onMoveToFlow: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onRunStep?: () => void;
+  onRunFromHere?: () => void;
+  onRunBlock?: () => void;
+  /** Whether execution is currently running. */
+  running?: boolean;
 }
 
 const itemClass =
@@ -34,8 +39,13 @@ export function FlowchartContextMenu({
   onMoveToFlow,
   onDuplicate,
   onDelete,
+  onRunStep,
+  onRunFromHere,
+  onRunBlock,
+  running,
 }: Props) {
   const hasSelection = selectedIds.length > 0;
+  const singleSelected = selectedIds.length === 1;
   const multiSelected = selectedIds.length > 1;
 
   return (
@@ -44,6 +54,29 @@ export function FlowchartContextMenu({
       <ContextMenu.Portal>
         <ContextMenu.Positioner sideOffset={4} className="z-[300] outline-none">
           <ContextMenu.Popup className="min-w-[180px] rounded-lg border border-fl-border-strong bg-fl-modal py-1 shadow-2xl outline-none">
+            {/* Execution actions */}
+            {singleSelected && !running && onRunStep && (
+              <ContextMenu.Item className={itemClass} onSelect={onRunStep}>
+                <span className="w-4 text-center text-[10px]" style={{ color: '#22c55e' }}>▶</span>
+                このステップを実行
+              </ContextMenu.Item>
+            )}
+            {singleSelected && !running && onRunFromHere && hasFlowSteps && (
+              <ContextMenu.Item className={itemClass} onSelect={onRunFromHere}>
+                <span className="w-4 text-center text-[10px]" style={{ color: '#22c55e' }}>▶▶</span>
+                ここから実行
+              </ContextMenu.Item>
+            )}
+            {!running && onRunBlock && (
+              <ContextMenu.Item className={itemClass} onSelect={onRunBlock}>
+                <span className="w-4 text-center text-[10px]" style={{ color: '#22c55e' }}>⏵</span>
+                ブロック全体を実行
+              </ContextMenu.Item>
+            )}
+            {(onRunStep || onRunFromHere || onRunBlock) && !running && (
+              <div className={separatorClass} />
+            )}
+
             {multiSelected && (
               <ContextMenu.Item className={itemClass} onSelect={onGroup}>
                 <span className="w-4 text-center text-[10px]">▤</span>

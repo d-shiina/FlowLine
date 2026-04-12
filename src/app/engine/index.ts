@@ -1,5 +1,5 @@
 export { Executor } from './executor';
-export type { ExecutionHooks } from './executor';
+export type { ExecutionHooks, ExecutionOptions } from './executor';
 export { MockRuntime } from './runtime';
 export type { NodeContext, Runtime, RuntimeResult } from './runtime';
 export { IpcRuntime } from './ipcRuntime';

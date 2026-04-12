@@ -209,8 +209,97 @@ export function StepInspector({
         </Section>
       )}
 
-      {/* Condition editor — loop / branch */}
-      {(step.type === 'loop' || step.type === 'branch') && (
+      {/* Loop configuration */}
+      {step.type === 'loop' && (
+        <>
+          <Section>
+            <SLabel>LOOP MODE</SLabel>
+            <div className="flex gap-1">
+              {(['count', 'while'] as const).map((m) => {
+                const current =
+                  step.params?.whileCondition !== undefined ? 'while' : 'count';
+                const active = current === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      if (m === 'count') {
+                        const { whileCondition: _, ...rest } =
+                          (step.params as Record<string, unknown>) ?? {};
+                        onUpdateStep(step.id, {
+                          params: { ...rest, iterations: rest.iterations ?? 3 },
+                        });
+                      } else {
+                        const { iterations: _, ...rest } =
+                          (step.params as Record<string, unknown>) ?? {};
+                        onUpdateStep(step.id, {
+                          params: { ...rest, whileCondition: rest.whileCondition ?? { '==': [{ var: 'scenario.flag' }, true] } },
+                        });
+                      }
+                    }}
+                    className="flex-1 rounded-md border px-2 py-1 font-mono text-[10px] transition-colors"
+                    style={{
+                      borderColor: active ? '#8B5CF6' : 'var(--fl-border-strong)',
+                      background: active ? '#8B5CF620' : 'transparent',
+                      color: active ? '#8B5CF6' : 'var(--fl-text-faint)',
+                    }}
+                  >
+                    {m === 'count' ? '回数指定' : '条件式'}
+                  </button>
+                );
+              })}
+            </div>
+          </Section>
+
+          {step.params?.whileCondition !== undefined ? (
+            <Section>
+              <SLabel>WHILE CONDITION</SLabel>
+              <JsonLogicField
+                value={step.params.whileCondition}
+                onChange={(whileCondition) =>
+                  onUpdateStep(step.id, {
+                    params: { ...step.params, whileCondition },
+                  })
+                }
+                scenarioVariables={scenarioVariables}
+              />
+              <div className="font-mono text-[8px] text-fl-text-ghost">
+                条件が true の間繰り返す (最大 10,000 回)
+              </div>
+            </Section>
+          ) : (
+            <Section>
+              <SLabel>ITERATIONS</SLabel>
+              <input
+                type="number"
+                min={1}
+                max={10000}
+                value={
+                  typeof step.params?.iterations === 'number'
+                    ? step.params.iterations
+                    : 1
+                }
+                onChange={(e) =>
+                  onUpdateStep(step.id, {
+                    params: {
+                      ...step.params,
+                      iterations: Math.max(1, Number(e.target.value) || 1),
+                    },
+                  })
+                }
+                className="w-full rounded-md border border-fl-border-strong bg-fl-panel-2 px-2 py-1 font-mono text-[11px] text-fl-text outline-none"
+              />
+              <div className="font-mono text-[8px] text-fl-text-ghost">
+                子ステップを指定回数繰り返す
+              </div>
+            </Section>
+          )}
+        </>
+      )}
+
+      {/* Branch condition editor */}
+      {step.type === 'branch' && (
         <Section>
           <SLabel>CONDITION</SLabel>
           <JsonLogicField
@@ -222,23 +311,45 @@ export function StepInspector({
             }
             scenarioVariables={scenarioVariables}
           />
+          <div className="flex gap-3 font-mono text-[8px] text-fl-text-ghost">
+            <span>TRUE → then ブランチ</span>
+            <span>FALSE → else ブランチ</span>
+          </div>
         </Section>
       )}
 
-      {/* Switch case manager */}
+      {/* Switch expression + case manager */}
       {step.type === 'switch' && (
-        <Section>
-          <SwitchCasesSection
-            cases={
-              Array.isArray(step.params?.cases)
-                ? (step.params.cases as string[])
-                : ['case_0', 'default']
-            }
-            onChange={(cases) =>
-              onUpdateStep(step.id, { params: { ...step.params, cases } })
-            }
-          />
-        </Section>
+        <>
+          <Section>
+            <SLabel>EXPRESSION</SLabel>
+            <JsonLogicField
+              value={step.params?.expression}
+              onChange={(expression) =>
+                onUpdateStep(step.id, {
+                  params: { ...step.params, expression },
+                })
+              }
+              scenarioVariables={scenarioVariables}
+              mode="value"
+            />
+            <div className="font-mono text-[8px] text-fl-text-ghost">
+              評価結果に一致する case を実行
+            </div>
+          </Section>
+          <Section>
+            <SwitchCasesSection
+              cases={
+                Array.isArray(step.params?.cases)
+                  ? (step.params.cases as string[])
+                  : ['case_0', 'default']
+              }
+              onChange={(cases) =>
+                onUpdateStep(step.id, { params: { ...step.params, cases } })
+              }
+            />
+          </Section>
+        </>
       )}
 
       {/* Subroutine picker */}

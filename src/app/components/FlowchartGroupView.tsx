@@ -20,6 +20,7 @@ interface Props {
   onDelete: (stepId: string) => void;
   onAddChild: () => void;
   onDragStart?: (stepId: string, e: React.MouseEvent) => void;
+  onRunStep?: (stepId: string) => void;
 }
 
 const meta = STEP_META.group;
@@ -40,6 +41,7 @@ export function FlowchartGroupView({
   onDelete,
   onAddChild,
   onDragStart,
+  onRunStep,
 }: Props) {
   const borderColor = dropTarget
     ? '#3b82f6'
@@ -121,6 +123,7 @@ export function FlowchartGroupView({
                     onSelect={onSelect}
                     onDelete={onDelete}
                     onDragStart={onDragStart}
+                    onRunStep={onRunStep}
                   />
                 </div>
               ))

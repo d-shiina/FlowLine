@@ -500,6 +500,7 @@ export default function App() {
             nodeManifest={nodeManifest}
             scenarioVariables={scenario.variables.scenario}
             executionStatus={blockStatus}
+            running={playing}
             onBack={() => setEditingBlock(null)}
             onUpdateBlock={(patch) => {
               store.updateBlock(
@@ -509,6 +510,23 @@ export default function App() {
               );
             }}
             onCreateVariable={store.setVariable}
+            onRunStep={(stepId) => {
+              execution.clear();
+              execution.start(scenario, { singleStepId: stepId });
+            }}
+            onRunFromStep={(stepId) => {
+              execution.clear();
+              execution.start(scenario, {
+                singleBlockId: editingBlock.blockId,
+                startStepId: stepId,
+              });
+            }}
+            onRunBlock={() => {
+              execution.clear();
+              execution.start(scenario, {
+                singleBlockId: editingBlock.blockId,
+              });
+            }}
           />
         </div>
       )}

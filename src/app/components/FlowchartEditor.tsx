@@ -21,9 +21,15 @@ interface Props {
   scenarioVariables: Record<string, unknown>;
   /** Live execution status map (blockId/stepId → status). */
   executionStatus: Record<string, BlockStatus>;
+  /** Whether execution is currently running. */
+  running: boolean;
   onBack: () => void;
   onUpdateBlock: (patch: Partial<Block>) => void;
   onCreateVariable: (key: string, value: unknown) => void;
+  /** Partial execution triggers. */
+  onRunStep?: (stepId: string) => void;
+  onRunFromStep?: (stepId: string) => void;
+  onRunBlock?: () => void;
 }
 
 /** Height of each step card + connector for layout calculation. */
@@ -119,8 +125,12 @@ export function FlowchartEditor({
   nodeManifest,
   scenarioVariables,
   executionStatus,
+  running,
   onBack,
   onUpdateBlock,
+  onRunStep,
+  onRunFromStep,
+  onRunBlock,
 }: Props) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [addStepOpen, setAddStepOpen] = useState(false);
@@ -620,12 +630,24 @@ export function FlowchartEditor({
           hasFlowSteps={hasFlowSteps}
           hasFreeSteps={hasFreeSteps}
           isGroupSelected={isGroupSelected}
+          running={running}
           onGroup={handleGroup}
           onUngroup={handleUngroup}
           onMoveToFree={handleMoveToFree}
           onMoveToFlow={handleMoveToFlow}
           onDuplicate={handleDuplicateSelected}
           onDelete={handleDeleteSelected}
+          onRunStep={
+            onRunStep && selectedIds.length === 1
+              ? () => onRunStep(selectedIds[0])
+              : undefined
+          }
+          onRunFromHere={
+            onRunFromStep && selectedIds.length === 1
+              ? () => onRunFromStep(selectedIds[0])
+              : undefined
+          }
+          onRunBlock={onRunBlock}
         >
           <div
             ref={canvasRef}
@@ -720,6 +742,7 @@ export function FlowchartEditor({
                         setAddStepOpen(true);
                       }}
                       onDragStart={handleDragStart}
+                      onRunStep={onRunStep && !running ? onRunStep : undefined}
                     />
                   ) : (
                     <FlowchartStepView
@@ -729,6 +752,7 @@ export function FlowchartEditor({
                       onSelect={(id) => handleSelect(id)}
                       onDelete={handleDeleteStep}
                       onDragStart={handleDragStart}
+                      onRunStep={onRunStep && !running ? onRunStep : undefined}
                     />
                   )}
                 </div>
@@ -793,6 +817,7 @@ export function FlowchartEditor({
                     onSelect={(id) => handleSelect(id)}
                     onDelete={handleDeleteStep}
                     onDragStart={handleDragStart}
+                    onRunStep={onRunStep && !running ? onRunStep : undefined}
                   />
                   {/* Free-area badge */}
                   <div

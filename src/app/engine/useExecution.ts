@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Scenario } from '../types';
-import { Executor } from './executor';
+import { Executor, type ExecutionOptions } from './executor';
 import { IpcRuntime } from './ipcRuntime';
 import { MockRuntime, type Runtime } from './runtime';
 import { IDLE_EXECUTION_STATE, type ExecutionState } from './types';
@@ -8,7 +8,7 @@ import { IDLE_EXECUTION_STATE, type ExecutionState } from './types';
 export interface UseExecution {
   state: ExecutionState;
   running: boolean;
-  start: (scenario: Scenario) => void;
+  start: (scenario: Scenario, options?: ExecutionOptions) => void;
   abort: () => void;
   clear: () => void;
 }
@@ -34,7 +34,7 @@ export function useExecution(): UseExecution {
   const executorRef = useRef<Executor | null>(null);
   const ipcRuntimeRef = useRef<IpcRuntime | null>(null);
 
-  const start = useCallback((scenario: Scenario) => {
+  const start = useCallback((scenario: Scenario, options?: ExecutionOptions) => {
     if (executorRef.current) return;
 
     // Kick off an async boot of the Python worker in parallel with
@@ -60,9 +60,12 @@ export function useExecution(): UseExecution {
       // If the user hit Stop before the runtime finished booting,
       // bail out without starting an executor.
       if (executorRef.current) return;
-      const executor = new Executor(scenario, runtime, {
-        onStateChange: (s) => setState(s),
-      });
+      const executor = new Executor(
+        scenario,
+        runtime,
+        { onStateChange: (s) => setState(s) },
+        options,
+      );
       executorRef.current = executor;
       executor
         .run()

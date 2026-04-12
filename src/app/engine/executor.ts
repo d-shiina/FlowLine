@@ -12,6 +12,20 @@ export interface ExecutionHooks {
 }
 
 /**
+ * Options for partial execution.
+ * - ``singleBlockId`` — run only this block (within its track).
+ * - ``startStepId`` — within the target block, skip steps before
+ *   this one and start from here.
+ * - ``singleStepId`` — run only this one step (implies the
+ *   containing block).
+ */
+export interface ExecutionOptions {
+  singleBlockId?: string;
+  startStepId?: string;
+  singleStepId?: string;
+}
+
+/**
  * Waiter used by `waitForBlocks`. `deps` hold the block ids to await;
  * `resolve` is called once all of them have reached a terminal status
  * (`ok` / `skipped` / `error` / `cancelled`).
@@ -72,10 +86,18 @@ export class Executor {
    */
   private variables: Map<string, unknown>;
 
-  constructor(scenario: Scenario, runtime: Runtime, hooks: ExecutionHooks) {
+  private options: ExecutionOptions;
+
+  constructor(
+    scenario: Scenario,
+    runtime: Runtime,
+    hooks: ExecutionHooks,
+    options: ExecutionOptions = {},
+  ) {
     this.scenario = scenario;
     this.runtime = runtime;
     this.hooks = hooks;
+    this.options = options;
     this.state = {
       running: true,
       phase: 'running',
@@ -91,6 +113,9 @@ export class Executor {
   }
 
   async run(): Promise<void> {
+    const { singleBlockId, startStepId, singleStepId } = this.options;
+    const isPartial = !!(singleBlockId || singleStepId);
+
     // Initialize every block's status to idle so the UI can distinguish
     // "not yet executed" from "absent".
     for (const t of this.scenario.tracks) {
@@ -109,13 +134,22 @@ export class Executor {
         for (const s of b.steps) this.state.status[s.id] = 'idle';
       }
     }
-    this.log('info', undefined, undefined, 'シナリオ実行開始');
+
+    if (isPartial) {
+      this.log('info', undefined, undefined, '部分実行開始');
+    } else {
+      this.log('info', undefined, undefined, 'シナリオ実行開始');
+    }
     this.flush();
 
     try {
-      await Promise.all(
-        this.scenario.tracks.map((t) => this.runTrack(t)),
-      );
+      if (isPartial) {
+        await this.runPartial();
+      } else {
+        await Promise.all(
+          this.scenario.tracks.map((t) => this.runTrack(t)),
+        );
+      }
     } catch (err) {
       this.log(
         'error',
@@ -126,22 +160,168 @@ export class Executor {
     }
 
     if (this.aborted) {
-      this.state.phase = 'error-handler';
-      this.flush();
-      if (this.scenario.errorHandler.blocks.length > 0) {
-        this.log('warn', undefined, undefined, 'エラー処理トラック実行');
-        await this.runErrorHandler(this.scenario.errorHandler);
+      if (!isPartial) {
+        this.state.phase = 'error-handler';
+        this.flush();
+        if (this.scenario.errorHandler.blocks.length > 0) {
+          this.log('warn', undefined, undefined, 'エラー処理トラック実行');
+          await this.runErrorHandler(this.scenario.errorHandler);
+        }
       }
       this.state.phase = 'aborted';
-      this.log('warn', undefined, undefined, 'シナリオ中止');
+      this.log('warn', undefined, undefined, isPartial ? '部分実行中止' : 'シナリオ中止');
     } else {
       this.state.phase = 'done';
-      this.log('info', undefined, undefined, 'シナリオ完了');
+      this.log('info', undefined, undefined, isPartial ? '部分実行完了' : 'シナリオ完了');
     }
 
     this.state.running = false;
-    // Clear track playheads so the UI doesn't keep a final highlight.
     this.state.currentSlot = {};
+    this.flush();
+  }
+
+  /**
+   * Run a subset of the scenario (single block, single step, or
+   * from-step). Resolves the target block/track and delegates.
+   */
+  private async runPartial(): Promise<void> {
+    const { singleBlockId, startStepId, singleStepId } = this.options;
+    const targetBlockId = singleBlockId ?? this.findBlockForStep(singleStepId ?? startStepId ?? '');
+
+    if (!targetBlockId) {
+      this.log('error', undefined, undefined, '対象ブロックが見つかりません');
+      return;
+    }
+
+    // Find block + its track
+    let targetTrack: Track | undefined;
+    let targetBlock: Block | undefined;
+    for (const t of this.scenario.tracks) {
+      const b = t.blocks.find((bl) => bl.id === targetBlockId);
+      if (b) {
+        targetTrack = t;
+        targetBlock = b;
+        break;
+      }
+    }
+    if (!targetTrack || !targetBlock) {
+      this.log('error', undefined, undefined, '対象ブロックが見つかりません');
+      return;
+    }
+
+    this.state.currentSlot[targetTrack.id] = targetBlock.slot;
+
+    if (singleStepId) {
+      // Run a single step only
+      const step = targetBlock.steps.find((s) => s.id === singleStepId);
+      if (!step) {
+        this.log('error', undefined, undefined, '対象ステップが見つかりません');
+        return;
+      }
+      this.state.status[targetBlock.id] = 'running';
+      this.log(
+        'info',
+        targetTrack.id,
+        targetBlock.id,
+        `ステップ「${step.label}」を単体実行`,
+        step.id,
+      );
+      this.flush();
+      await this.executeStepOrGroup(
+        targetTrack.id,
+        targetBlock,
+        step,
+        { isErrorHandler: false },
+      );
+      this.state.status[targetBlock.id] =
+        this.state.status[step.id] === 'error' ? 'error' : 'ok';
+      this.flush();
+    } else {
+      // Run the block, possibly from a specific step
+      if (startStepId) {
+        await this.executeTaskFrom(
+          targetTrack.id,
+          targetBlock,
+          startStepId,
+          { isErrorHandler: false },
+        );
+      } else {
+        await this.executeTask(
+          targetTrack.id,
+          targetBlock,
+          { isErrorHandler: false },
+        );
+      }
+    }
+
+    delete this.state.currentSlot[targetTrack.id];
+    this.flush();
+  }
+
+  /** Resolve a stepId to its containing blockId. */
+  private findBlockForStep(stepId: string): string | undefined {
+    for (const t of this.scenario.tracks) {
+      for (const b of t.blocks) {
+        if (b.steps.some((s) => s.id === stepId)) return b.id;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Execute a block's flowchart starting from a specific step,
+   * skipping earlier steps.
+   */
+  private async executeTaskFrom(
+    containerId: string,
+    block: Block,
+    startStepId: string,
+    opts: { isErrorHandler: boolean },
+  ): Promise<void> {
+    this.state.status[block.id] = 'running';
+    this.log('info', containerId, block.id, `タスク「${block.label}」開始 (途中から)`);
+    this.flush();
+
+    for (const step of block.steps) {
+      this.state.status[step.id] = 'idle';
+    }
+    this.flush();
+
+    const topLevel = block.steps
+      .filter((s) => !s.parentStepId && s.inFlow !== false)
+      .sort((a, b) => a.order - b.order);
+
+    // Find start index
+    const startIdx = topLevel.findIndex((s) => s.id === startStepId);
+    const stepsToRun = startIdx >= 0 ? topLevel.slice(startIdx) : topLevel;
+
+    // Mark skipped steps
+    for (let i = 0; i < startIdx && i < topLevel.length; i++) {
+      this.state.status[topLevel[i].id] = 'skipped';
+    }
+    this.flush();
+
+    let failed = false;
+    for (const step of stepsToRun) {
+      if (this.aborted) {
+        this.markCancelled(step.id);
+        continue;
+      }
+      await this.executeStepOrGroup(containerId, block, step, opts);
+      if (this.state.status[step.id] === 'error') {
+        failed = true;
+        break;
+      }
+    }
+
+    if (this.aborted) {
+      this.state.status[block.id] = 'cancelled';
+    } else if (failed) {
+      this.state.status[block.id] = 'error';
+    } else {
+      this.state.status[block.id] = 'ok';
+      this.log('info', containerId, block.id, `タスク「${block.label}」完了`);
+    }
     this.flush();
   }
 
