@@ -37,7 +37,7 @@ function isTerminal(status: BlockStatus | undefined): boolean {
  *
  * Responsibilities:
  * 1. Walk each track in parallel, respecting block order by slot.
- * 2. Wait for `deps` and sync points before running a block.
+ * 2. Wait for sync points before running a block.
  * 3. Delegate the actual "run" to a `Runtime` (the `MockRuntime` today,
  *    a real Python worker later).
  * 4. Apply per-block `onError` (abort / skip / ignore / retry(n)).

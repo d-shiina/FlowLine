@@ -48,7 +48,7 @@ function fromKey(k: OnErrorKey, current: OnError | undefined): OnError {
  * ``inspector/ControlFlowSections.tsx`` (loop / branch / switch
  * params) and ``inspector/NodeSection.tsx`` (Python node ports +
  * params). The facade owns shared concerns: label / slot / lane
- * picker / error-handling / deps / timeout.
+ * picker / error-handling / timeout.
  */
 export function Inspector({
   block,
