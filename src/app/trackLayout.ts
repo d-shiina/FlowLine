@@ -1,43 +1,104 @@
 import type { Block, Track } from './types';
+import { BLOCK_META } from './types';
 import { BLOCK_MARGIN, BLOCK_W, LANE_H, SLOT_PX, TRACK_H } from './layout';
+import { summarizeExpression } from './engine/jsonLogic';
 
 /**
- * Shared layout math for the FLOWLINE timeline.
+ * Shared layout math for the FLOWLINE timeline — the single source
+ * of truth for every pixel-level decision the canvas makes.
  *
- * Both TrackRow (via its own memo) and GraphEdges (via this
- * helper) need to know the vertical position of every block so
- * the rendered block itself and the dep arrows pointing at it
- * agree on where it is. Since tracks now grow dynamically for
- * multi-lane containers (branch/switch) and children are offset
- * by a 16 px header strip, a shared computation is cheaper than
- * re-deriving the numbers in two places and drifting over time.
+ * Without this, four places ended up recomputing the same geometry
+ * and drifting: TrackRow for frame / lane rendering, BlockView for
+ * per-block Y offset, GraphEdges for arrow routing, and App for the
+ * overlay container height. All of them now call into one of the
+ * two entry points here:
  *
- * Positions are in **container-local pixels** — the y axis
- * starts at 0 for the first regular track and increases
- * downwards, matching the overlay div TrackRow is wrapped in.
+ * - ``computeTrackLayout(track)``  — single track, used by TrackRow
+ *   and BlockView. Returns container frames, per-block lane info,
+ *   per-block boxes, and the dynamic track height.
+ * - ``computeTracksLayout(tracks)`` — whole canvas, used by
+ *   GraphEdges to route arrows across tracks and by App to size the
+ *   overlay that hosts them. Stitches per-track layouts together
+ *   with running Y offsets.
+ *
+ * Layout invariants (must stay coherent with BlockView rendering):
+ *
+ * 1. Every loop / branch / switch renders as its own frame; the
+ *    container block itself doesn't draw a standalone card, so its
+ *    "position" is the frame header's centre.
+ * 2. Frames span ``[min(parent.slot, minChildSlot),
+ *    max(parent.slot, maxChildSlot)]``. Empty containers collapse
+ *    to 1 slot wide at ``parent.slot`` so the first child lands
+ *    flush against the header.
+ * 3. Each container header is ``FRAME_HEADER_H`` px tall;
+ *    children live below it. Branches and switches split the body
+ *    into N lanes; loops and single-lane fallbacks fill the whole
+ *    body.
+ * 4. Track height grows from ``TRACK_H`` (baseline) to
+ *    ``FRAME_HEADER_H + maxLanes * LANE_H + 16`` when a lane stack
+ *    needs more space.
+ * 5. Top-level (non-nested) regular blocks get the full row height.
  */
 
-/** Matches the 16 px header drawn inside every container frame. */
+/** Height of every container frame's coloured header strip, in px. */
 export const FRAME_HEADER_H = 16;
 const FRAME_INSET = 3;
 
+/** Box used by GraphEdges to attach arrow endpoints. */
 export interface BlockLayoutBox {
-  /** Left edge in canvas pixels (same as BlockView's `left`). */
   leftX: number;
-  /** Right edge (leftX + width). Full frame width for containers. */
   rightX: number;
-  /** Vertical centre — the Y arrows should target / originate. */
   y: number;
 }
 
+/** Lane assignment for a block nested inside a container. */
+export interface BlockLaneInfo {
+  laneIndex: number;
+  laneCount: number;
+  color: string;
+}
+
+/** Container frame rectangle + metadata — consumed by TrackRow / BlockView. */
+export interface ContainerFrame {
+  block: Block;
+  parentType: 'loop' | 'branch' | 'switch';
+  label: string;
+  color: string;
+  fromSlot: number;
+  toSlot: number;
+  /** True when the container has no children yet (ghost drop zone). */
+  empty: boolean;
+  /** Lane labels top-to-bottom. Single-entry `['']` for loops. */
+  cases: string[];
+  /** Short one-liner rendered on the right edge of the header. */
+  summary: string;
+}
+
+/** Result of laying out a single track. */
+export interface TrackLayout {
+  /** Dynamic height of the track row in pixels. */
+  trackHeight: number;
+  /** Container frames to render behind the blocks. */
+  containerFrames: ContainerFrame[];
+  /** Lane info for every child of a container, keyed by block id. */
+  blockLanes: Map<string, BlockLaneInfo>;
+  /**
+   * Per-block boxes in *track-local* coordinates (y = 0 at the top
+   * of the track row). ``computeTracksLayout`` shifts these into
+   * canvas coordinates for GraphEdges.
+   */
+  blocks: Map<string, BlockLayoutBox>;
+}
+
+/** Result of laying out every regular track. */
 export interface TracksLayout {
-  /** Block id → position + width used for arrow routing. */
-  positions: Map<string, BlockLayoutBox>;
-  /** Top edge of each track in canvas pixels, aligned with tracks[i]. */
+  /** Track-local layouts, aligned with ``tracks[i]``. */
+  perTrack: TrackLayout[];
+  /** Top edge of each track in canvas pixels. */
   trackTops: number[];
-  /** Dynamic height of each track in canvas pixels. */
-  trackHeights: number[];
-  /** Sum of `trackHeights` — overlay height consumers use this. */
+  /** Per-block boxes in canvas coordinates (y already offset). */
+  positions: Map<string, BlockLayoutBox>;
+  /** Sum of ``perTrack[i].trackHeight`` — overlay height. */
   totalHeight: number;
 }
 
@@ -55,103 +116,181 @@ export function casesForContainer(block: Block): string[] {
 }
 
 /**
- * Walk every track and derive block boxes + track heights.
- *
- * Layout rules (must stay in sync with TrackRow / BlockView):
- *
- * 1. Per track, scan for loop/branch/switch blocks and compute
- *    `maxLanes = max(casesForContainer(c).length)`. The track
- *    grows from TRACK_H to `FRAME_HEADER_H + maxLanes * LANE_H +
- *    16` when that's larger, matching TrackRow's calculation.
- * 2. Container blocks render as frames, not standalone cards.
- *    Their Y is the vertical centre of the header strip (so
- *    arrows enter/leave cleanly), and their X span covers
- *    `[fromSlot, toSlot]` based on the block's slot plus its
- *    children's slots.
- * 3. Children of a container sit below the header. Multi-lane
- *    containers split the remaining body height among cases;
- *    loops and single-lane fallbacks fill the whole body.
- * 4. Top-level regular blocks keep the full-row Y (track centre),
- *    matching BlockView's default placement.
+ * Short description rendered on the right edge of a container's
+ * header bar. Loops show iteration count or ``while …``, branches
+ * show their condition in infix form, switches show the evaluated
+ * expression plus case count. Capped at 32 chars so the header
+ * doesn't overflow on complex expressions.
  */
-export function computeTracksLayout(tracks: Track[]): TracksLayout {
-  const positions = new Map<string, BlockLayoutBox>();
-  const trackTops: number[] = [];
-  const trackHeights: number[] = [];
-
-  let accY = 0;
-  for (const track of tracks) {
-    const containers = track.blocks.filter(
-      (b) =>
-        b.type === 'loop' || b.type === 'branch' || b.type === 'switch',
-    );
-    const casesByParent = new Map<string, string[]>();
-    let maxLanes = 1;
-    for (const parent of containers) {
-      const cases = casesForContainer(parent);
-      casesByParent.set(parent.id, cases);
-      if (cases.length > maxLanes) maxLanes = cases.length;
+function summarizeContainer(block: Block, cases: string[]): string {
+  const params =
+    (block.params as Record<string, unknown> | undefined) ?? {};
+  let summary = '';
+  if (block.type === 'loop') {
+    if (params.whileCondition !== undefined) {
+      const s = summarizeExpression(params.whileCondition);
+      summary = s ? `while ${s}` : 'while';
+    } else if (typeof params.iterations === 'number') {
+      summary = `× ${params.iterations}`;
     }
-    const trackH = Math.max(
-      TRACK_H,
-      FRAME_HEADER_H + maxLanes * LANE_H + 16,
+  } else if (block.type === 'branch') {
+    summary = summarizeExpression(params.condition) || '';
+  } else if (block.type === 'switch') {
+    const s = summarizeExpression(params.expression);
+    summary = s ? `${s} → ${cases.length}` : `${cases.length} cases`;
+  }
+  if (summary.length > 32) summary = summary.slice(0, 30) + '…';
+  return summary;
+}
+
+/**
+ * Lay out a single track. Called by TrackRow (for rendering) and by
+ * ``computeTracksLayout`` (for stitching multi-track arrow routing).
+ * Track-local Y axis: 0 at the top of the row.
+ */
+export function computeTrackLayout(track: Track): TrackLayout {
+  const containerFrames: ContainerFrame[] = [];
+  const casesByParent = new Map<string, string[]>();
+  let maxLanes = 1;
+
+  for (const parent of track.blocks) {
+    if (
+      parent.type !== 'loop' &&
+      parent.type !== 'branch' &&
+      parent.type !== 'switch'
+    ) {
+      continue;
+    }
+    const cases = casesForContainer(parent);
+    casesByParent.set(parent.id, cases);
+    if (cases.length > maxLanes) maxLanes = cases.length;
+
+    const children = track.blocks.filter(
+      (b) => b.parentBlockId === parent.id,
     );
-    trackTops.push(accY);
-    trackHeights.push(trackH);
+    let fromSlot: number;
+    let toSlot: number;
+    let empty = false;
+    if (children.length === 0) {
+      fromSlot = parent.slot;
+      toSlot = parent.slot;
+      empty = true;
+    } else {
+      const childSlots = children.map((c) => c.slot);
+      fromSlot = Math.min(parent.slot, ...childSlots);
+      toSlot = Math.max(parent.slot, ...childSlots);
+    }
 
-    const headerCenterY = accY + FRAME_INSET + FRAME_HEADER_H / 2;
-    const bodyTopY = accY + FRAME_INSET + FRAME_HEADER_H;
-    const bodyH = trackH - FRAME_HEADER_H - FRAME_INSET * 2;
+    containerFrames.push({
+      block: parent,
+      parentType: parent.type,
+      label: parent.label,
+      color: BLOCK_META[parent.type].color,
+      fromSlot,
+      toSlot,
+      empty,
+      cases,
+      summary: summarizeContainer(parent, cases),
+    });
+  }
+  containerFrames.sort((a, b) => a.fromSlot - b.fromSlot);
 
-    for (const b of track.blocks) {
-      if (
-        b.type === 'loop' ||
-        b.type === 'branch' ||
-        b.type === 'switch'
-      ) {
-        // Frame spans from fromSlot (container slot or leftmost
-        // child) to toSlot (rightmost child, or container.slot+1
-        // for an empty ghost frame).
-        const children = track.blocks.filter((c) => c.parentBlockId === b.id);
-        let fromSlot = b.slot;
-        let toSlot = b.slot;
-        if (children.length === 0) {
-          toSlot = b.slot + 1;
-        } else {
-          fromSlot = Math.min(b.slot, ...children.map((c) => c.slot));
-          toSlot = Math.max(b.slot, ...children.map((c) => c.slot));
-        }
-        const leftX = fromSlot * SLOT_PX + BLOCK_MARGIN / 2;
-        const rightX = (toSlot + 1) * SLOT_PX - BLOCK_MARGIN / 2;
-        positions.set(b.id, { leftX, rightX, y: headerCenterY });
-        continue;
-      }
+  const trackHeight = Math.max(
+    TRACK_H,
+    FRAME_HEADER_H + maxLanes * LANE_H + 16,
+  );
+  const bodyTopY = FRAME_INSET + FRAME_HEADER_H;
+  const bodyH = trackHeight - FRAME_HEADER_H - FRAME_INSET * 2;
+  const headerCenterY = FRAME_INSET + FRAME_HEADER_H / 2;
 
-      const leftX = b.slot * SLOT_PX + BLOCK_MARGIN;
-      const rightX = leftX + BLOCK_W;
+  const blockLanes = new Map<string, BlockLaneInfo>();
+  const blocks = new Map<string, BlockLayoutBox>();
 
-      if (b.parentBlockId) {
-        const cases = casesByParent.get(b.parentBlockId) ?? [''];
-        const laneIdx =
+  for (const b of track.blocks) {
+    // Container blocks are rendered as frames — their "position"
+    // is the frame rectangle + header centre, so arrows attach
+    // cleanly to the header bar.
+    if (
+      b.type === 'loop' ||
+      b.type === 'branch' ||
+      b.type === 'switch'
+    ) {
+      const frame = containerFrames.find((f) => f.block.id === b.id);
+      if (!frame) continue;
+      blocks.set(b.id, {
+        leftX: frame.fromSlot * SLOT_PX + BLOCK_MARGIN / 2,
+        rightX: (frame.toSlot + 1) * SLOT_PX - BLOCK_MARGIN / 2,
+        y: headerCenterY,
+      });
+      continue;
+    }
+
+    const leftX = b.slot * SLOT_PX + BLOCK_MARGIN;
+    const rightX = leftX + BLOCK_W;
+
+    // Children of a container: compute lane offset. Loops + single-
+    // lane fallbacks get lane 0 which still offsets them below the
+    // header.
+    if (b.parentBlockId) {
+      const parentFrame = containerFrames.find(
+        (f) => f.block.id === b.parentBlockId,
+      );
+      if (parentFrame) {
+        const cases = parentFrame.cases;
+        const laneIndex =
           cases.length > 1
             ? Math.max(0, cases.indexOf(b.parentBranch ?? cases[0]))
             : 0;
+        blockLanes.set(b.id, {
+          laneIndex,
+          laneCount: cases.length,
+          color: parentFrame.color,
+        });
         const laneH = bodyH / Math.max(1, cases.length);
-        const y = bodyTopY + laneIdx * laneH + laneH / 2;
-        positions.set(b.id, { leftX, rightX, y });
+        blocks.set(b.id, {
+          leftX,
+          rightX,
+          y: bodyTopY + laneIndex * laneH + laneH / 2,
+        });
         continue;
       }
-
-      // Top-level regular block — full-row centre.
-      positions.set(b.id, {
-        leftX,
-        rightX,
-        y: accY + trackH / 2,
-      });
     }
 
-    accY += trackH;
+    // Top-level regular block — full row height.
+    blocks.set(b.id, {
+      leftX,
+      rightX,
+      y: trackHeight / 2,
+    });
   }
 
-  return { positions, trackTops, trackHeights, totalHeight: accY };
+  return { trackHeight, containerFrames, blockLanes, blocks };
+}
+
+/**
+ * Lay out every regular track and stitch their per-track Y
+ * coordinates into a single canvas-coordinate space so GraphEdges
+ * can route arrows between blocks on different tracks.
+ */
+export function computeTracksLayout(tracks: Track[]): TracksLayout {
+  const perTrack: TrackLayout[] = [];
+  const trackTops: number[] = [];
+  const positions = new Map<string, BlockLayoutBox>();
+
+  let accY = 0;
+  for (const track of tracks) {
+    const layout = computeTrackLayout(track);
+    perTrack.push(layout);
+    trackTops.push(accY);
+    for (const [id, box] of layout.blocks) {
+      positions.set(id, {
+        leftX: box.leftX,
+        rightX: box.rightX,
+        y: accY + box.y,
+      });
+    }
+    accY += layout.trackHeight;
+  }
+
+  return { perTrack, trackTops, positions, totalHeight: accY };
 }

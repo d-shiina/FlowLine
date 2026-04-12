@@ -3,15 +3,8 @@ import { AlertTriangle } from 'lucide-react';
 import type { Block, Subroutine, Track } from '../types';
 import { BLOCK_META } from '../types';
 import type { BlockStatus } from '../engine';
-import { summarizeExpression } from '../engine/jsonLogic';
-import {
-  BLOCK_MARGIN,
-  HEADER_W,
-  LANE_H,
-  SLOT_PX,
-  TRACK_H,
-  pxToSlot,
-} from '../layout';
+import { BLOCK_MARGIN, HEADER_W, SLOT_PX, pxToSlot } from '../layout';
+import { computeTrackLayout } from '../trackLayout';
 import { BlockView } from './BlockView';
 
 type Variant = 'normal' | 'error';
@@ -87,156 +80,12 @@ export function TrackRow({
     setRenaming(false);
   };
 
-  // Compute container-frame rects for every loop / branch / switch
-  // on this track. Flow-control blocks are rendered AS these
-  // frames (not as standalone BlockViews), so each frame carries
-  // enough metadata for the renderer to draw a Blender-node-style
-  // header + lane split + status coloring + click handler.
-  //
-  // Empty containers still get a minimum 1-slot frame so the drop
-  // zone is visible. Sorted by fromSlot so overlapping frames
-  // layer predictably (leftmost rendered first).
-  const containerFrames = useMemo(() => {
-    interface FrameInfo {
-      block: Block;
-      parentType: 'loop' | 'branch' | 'switch';
-      label: string;
-      color: string;
-      fromSlot: number;
-      toSlot: number;
-      empty: boolean;
-      cases: string[];
-      /** Short summary line shown on the header (e.g. `× 3`, `case ...`). */
-      summary: string;
-    }
-    const frames: FrameInfo[] = [];
-    for (const parent of track.blocks) {
-      if (
-        parent.type !== 'loop' &&
-        parent.type !== 'branch' &&
-        parent.type !== 'switch'
-      ) {
-        continue;
-      }
-      const rawParams =
-        (parent.params as Record<string, unknown> | undefined) ?? {};
-      const cases: string[] =
-        parent.type === 'branch'
-          ? ['then', 'else']
-          : parent.type === 'switch'
-            ? Array.isArray(rawParams.cases)
-              ? (rawParams.cases as unknown[]).map((c) => String(c))
-              : ['case_0']
-            : [''];
-      const children = track.blocks.filter(
-        (b) => b.parentBlockId === parent.id,
-      );
-      let fromSlot: number;
-      let toSlot: number;
-      let empty = false;
-      if (children.length === 0) {
-        // 1-slot wide so the header anchor sits exactly at the
-        // container's own column. Growing to 2 slots used to leave
-        // an empty first cell when the user added the first child,
-        // because the click-to-add hit slot+1 instead of slot.
-        fromSlot = parent.slot;
-        toSlot = parent.slot;
-        empty = true;
-      } else {
-        const childMin = Math.min(...children.map((c) => c.slot));
-        const childMax = Math.max(...children.map((c) => c.slot));
-        fromSlot = Math.min(parent.slot, childMin);
-        toSlot = Math.max(parent.slot, childMax);
-      }
-
-      // A tiny one-line description rendered on the header's right
-      // edge so the user can tell loops with different iteration
-      // counts apart without opening the Inspector. Branches show
-      // a compact form of their condition; switches show their
-      // case count; loops show iteration count or `while` marker.
-      let summary = '';
-      if (parent.type === 'loop') {
-        if (rawParams.whileCondition !== undefined) {
-          const s = summarizeExpression(rawParams.whileCondition);
-          summary = s ? `while ${s}` : 'while';
-        } else if (typeof rawParams.iterations === 'number') {
-          summary = `× ${rawParams.iterations}`;
-        }
-      } else if (parent.type === 'branch') {
-        const s = summarizeExpression(rawParams.condition);
-        if (s) summary = s;
-      } else if (parent.type === 'switch') {
-        const s = summarizeExpression(rawParams.expression);
-        summary = s ? `${s} → ${cases.length}` : `${cases.length} cases`;
-      }
-      // Hard-cap the summary so a very long condition doesn't
-      // overflow the header bar. The Inspector shows the full
-      // expression when the user wants to inspect it.
-      if (summary.length > 32) summary = summary.slice(0, 30) + '…';
-
-      frames.push({
-        block: parent,
-        parentType: parent.type,
-        label: parent.label,
-        color: BLOCK_META[parent.type].color,
-        fromSlot,
-        toSlot,
-        empty,
-        cases,
-        summary,
-      });
-    }
-    frames.sort((a, b) => a.fromSlot - b.fromSlot);
-    return frames;
-  }, [track.blocks]);
-
-  // Row height grows to fit the widest lane stack on this track.
-  // Each container card carries a 16 px header plus `laneCount`
-  // lanes of minimum LANE_H. TRACK_H (72 px) is the baseline for
-  // tracks with no multi-lane container, giving a single ~56 px
-  // block slot plus padding.
-  const FRAME_HEADER_H = 16;
-  const maxLanes = useMemo(() => {
-    let n = 1;
-    for (const f of containerFrames) {
-      if (f.cases.length > n) n = f.cases.length;
-    }
-    return n;
-  }, [containerFrames]);
-  const trackHeight = Math.max(
-    TRACK_H,
-    FRAME_HEADER_H + maxLanes * LANE_H + 16,
-  );
-
-  // Per-block lane info keyed by block.id. Top-level blocks are
-  // absent (the full row is theirs). Children of ANY container —
-  // including single-lane loops — get an entry so BlockView knows
-  // to position below the container's header strip. Branches and
-  // switches add laneIndex > 0 for the non-first lane.
-  const blockLanes = useMemo(() => {
-    const out: Record<
-      string,
-      { laneIndex: number; laneCount: number; color: string }
-    > = {};
-    for (const f of containerFrames) {
-      for (const child of track.blocks) {
-        if (child.parentBlockId !== f.block.id) continue;
-        if (f.cases.length <= 1) {
-          out[child.id] = { laneIndex: 0, laneCount: 1, color: f.color };
-          continue;
-        }
-        const label = child.parentBranch ?? f.cases[0];
-        const idx = f.cases.indexOf(label);
-        if (idx < 0) continue;
-        out[child.id] = {
-          laneIndex: idx,
-          laneCount: f.cases.length,
-          color: f.color,
-        };
-      }
-    }
-    return out;
-  }, [containerFrames, track.blocks]);
+  // Layout computation is fully delegated to `computeTrackLayout`
+  // so TrackRow / BlockView / GraphEdges / App all agree on the
+  // same pixel-level decisions. Frames, lane assignments, and the
+  // dynamic track height come out of a single memoised call.
+  const layout = useMemo(() => computeTrackLayout(track), [track]);
+  const { containerFrames, blockLanes, trackHeight } = layout;
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
@@ -584,7 +433,7 @@ export function TrackRow({
               draggable={blocksDraggable}
               slotBounds={slotBounds[b.id]}
               containerFrames={containerFrames}
-              lane={blockLanes[b.id]}
+              lane={blockLanes.get(b.id)}
               trackHeight={trackHeight}
               subroutines={subroutines}
               onSelect={onSelectBlock}

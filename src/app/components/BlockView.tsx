@@ -3,33 +3,7 @@ import { createPortal } from 'react-dom';
 import { BLOCK_META, type Block, type Subroutine } from '../types';
 import type { BlockStatus } from '../engine';
 import { BLOCK_MARGIN, BLOCK_W, SLOT_PX, pxToSlot } from '../layout';
-
-/** Rect of a container frame rendered on the same track. */
-export interface ContainerFrameRect {
-  /** Reference to the underlying container block. */
-  block: Block;
-  parentType: 'loop' | 'branch' | 'switch';
-  label: string;
-  color: string;
-  fromSlot: number;
-  toSlot: number;
-  empty: boolean;
-  /** Lane labels, top-to-bottom. One entry = full-height body. */
-  cases: string[];
-  /** Short header summary like `× 3` / `while` / `3 cases`. */
-  summary: string;
-}
-
-/**
- * Rendering info for blocks that live inside a multi-case
- * container (branch / switch). Drives vertical offset + half-
- * height rendering so each case occupies its own lane.
- */
-export interface BlockLaneInfo {
-  laneIndex: number;
-  laneCount: number;
-  color: string;
-}
+import type { BlockLaneInfo, ContainerFrame } from '../trackLayout';
 
 interface Props {
   block: Block;
@@ -52,7 +26,7 @@ interface Props {
    * own frame is excluded from the hit-test so you can't nest it
    * inside itself.
    */
-  containerFrames: ContainerFrameRect[];
+  containerFrames: ContainerFrame[];
   /** Lane info when the block lives in a multi-case container. */
   lane?: BlockLaneInfo;
   /** Actual track row height (may grow for tall switches). */
@@ -210,7 +184,7 @@ export function BlockView({
      * parents into that container (and picks the right case lane
      * for branch / switch containers by hit-testing the Y axis).
      */
-    let landingFrame: ContainerFrameRect | null = null;
+    let landingFrame: ContainerFrame | null = null;
     let landingCase: string | undefined = undefined;
 
     const prevPointerEvents = node.style.pointerEvents;
