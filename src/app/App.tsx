@@ -22,13 +22,13 @@ import { SyncLine } from './components/SyncLine';
 import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
 import { SamplesModal } from './components/SamplesModal';
-import { VariablesModal } from './components/VariablesModal';
+// VariablesModal replaced by BottomPanel variables tab
 import { NodeEditor } from './components/NodeEditor';
 import { PythonInstallModal } from './components/PythonInstallModal';
 import type { PythonStatus } from '../globals';
 import { SubroutineSidebar } from './components/SubroutineSidebar';
 import { Inspector } from './components/Inspector';
-import { ExecutionLogPanel } from './components/ExecutionLogPanel';
+import { BottomPanel } from './components/BottomPanel';
 import { FlowchartEditor } from './components/FlowchartEditor';
 
 /**
@@ -294,7 +294,7 @@ export default function App() {
 
   // ─── samples + variables + node editor ────────────────────────────
   const [samplesOpen, setSamplesOpen] = useState(false);
-  const [variablesOpen, setVariablesOpen] = useState(false);
+  // Variables are now in the BottomPanel, no modal needed
   const [nodeEditorOpen, setNodeEditorOpen] = useState(false);
   const handleLoadSample = useCallback(
     (next: Scenario) => {
@@ -452,8 +452,6 @@ export default function App() {
         onImport={handleImport}
         onExport={handleExport}
         onSample={() => setSamplesOpen(true)}
-        onOpenVariables={() => setVariablesOpen(true)}
-        variableCount={Object.keys(scenario.variables.scenario).length}
         onOpenNodeEditor={() => setNodeEditorOpen(true)}
         nodeCount={nodeManifest.length}
         scenarioName={scenario.name}
@@ -754,13 +752,18 @@ export default function App() {
         />
       </div>
 
-      {/* Execution log panel (collapses to a thin status bar when idle) */}
-      <ExecutionLogPanel
+      {/* Bottom panel: logs + variables tabs */}
+      <BottomPanel
         logs={execution.state.logs}
         phase={execution.state.phase}
         phaseLabel={phaseLabel}
         running={execution.running}
         tracks={scenario.tracks}
+        variables={scenario.variables.scenario}
+        runtimeSnapshot={execution.state.variables}
+        onSetVariable={store.setVariable}
+        onRenameVariable={store.renameVariable}
+        onDeleteVariable={store.deleteVariable}
       />
 
       {/* Modals */}
@@ -788,15 +791,6 @@ export default function App() {
         open={samplesOpen}
         onOpenChange={setSamplesOpen}
         onLoad={handleLoadSample}
-      />
-      <VariablesModal
-        open={variablesOpen}
-        onOpenChange={setVariablesOpen}
-        variables={scenario.variables.scenario}
-        runtimeSnapshot={execution.state.variables}
-        onSet={store.setVariable}
-        onRename={store.renameVariable}
-        onDelete={store.deleteVariable}
       />
       <NodeEditor
         open={nodeEditorOpen}
