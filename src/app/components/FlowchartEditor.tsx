@@ -3,6 +3,7 @@ import type { Block, Step, Subroutine } from '../types';
 import type { NodeManifestEntry } from '../../globals';
 import { Breadcrumb } from './Breadcrumb';
 import { FlowchartStepView, StepConnector } from './FlowchartStepView';
+import { FlowchartGroupView } from './FlowchartGroupView';
 import { AddStepModal } from './AddStepModal';
 import { StepInspector } from './StepInspector';
 
@@ -42,6 +43,10 @@ export function FlowchartEditor({
 }: Props) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [addStepOpen, setAddStepOpen] = useState(false);
+  // When adding a step inside a group, track the parent.
+  const [addStepParent, setAddStepParent] = useState<string | undefined>(
+    undefined,
+  );
 
   const selectedStep = block.steps.find((s) => s.id === selectedStepId) ?? null;
 
@@ -117,13 +122,31 @@ export function FlowchartEditor({
               topLevelSteps.map((step, i) => (
                 <div key={step.id} className="flex flex-col items-center">
                   {i > 0 && <StepConnector />}
-                  <FlowchartStepView
-                    step={step}
-                    selected={selectedStepId === step.id}
-                    status="idle"
-                    onSelect={setSelectedStepId}
-                    onDelete={handleDeleteStep}
-                  />
+                  {step.type === 'group' ? (
+                    <FlowchartGroupView
+                      step={step}
+                      childSteps={block.steps
+                        .filter((s) => s.parentStepId === step.id)
+                        .sort((a, b) => a.order - b.order)}
+                      selected={selectedStepId === step.id}
+                      selectedStepId={selectedStepId}
+                      status="idle"
+                      onSelect={setSelectedStepId}
+                      onDelete={handleDeleteStep}
+                      onAddChild={() => {
+                        setAddStepParent(step.id);
+                        setAddStepOpen(true);
+                      }}
+                    />
+                  ) : (
+                    <FlowchartStepView
+                      step={step}
+                      selected={selectedStepId === step.id}
+                      status="idle"
+                      onSelect={setSelectedStepId}
+                      onDelete={handleDeleteStep}
+                    />
+                  )}
                 </div>
               ))
             )}
@@ -134,6 +157,7 @@ export function FlowchartEditor({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                setAddStepParent(undefined);
                 setAddStepOpen(true);
               }}
               className="rounded-lg border border-dashed border-fl-border-strong bg-transparent px-4 py-2 font-mono text-[10px] text-fl-text-faint transition-colors hover:border-[#3b82f6] hover:text-[#3b82f6]"
@@ -159,6 +183,7 @@ export function FlowchartEditor({
         onOpenChange={setAddStepOpen}
         blockLabel={block.label}
         nextOrder={nextOrder}
+        parentStepId={addStepParent}
         subroutines={subroutines}
         onAdd={handleAddStep}
       />

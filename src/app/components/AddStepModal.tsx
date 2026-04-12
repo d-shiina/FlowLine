@@ -14,6 +14,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   blockLabel: string;
   nextOrder: number;
+  /** When adding inside a group, the parent step id. */
+  parentStepId?: string;
   subroutines: Subroutine[];
   onAdd: (step: Step) => void;
 }
@@ -41,6 +43,8 @@ function defaultLabel(type: StepType): string {
       return '待機';
     case 'subroutine':
       return 'サブルーチン';
+    case 'group':
+      return 'グループ';
     case 'action':
     default:
       return 'アクション';
@@ -59,6 +63,7 @@ export function AddStepModal({
   onOpenChange,
   blockLabel,
   nextOrder,
+  parentStepId,
   subroutines,
   onAdd,
 }: Props) {
@@ -87,6 +92,7 @@ export function AddStepModal({
       order: nextOrder,
       ...(params !== undefined ? { params } : {}),
       ...(type === 'subroutine' ? { subroutineId } : {}),
+      ...(parentStepId ? { parentStepId } : {}),
     });
     setCustom('');
     setSubroutineId('');
@@ -192,7 +198,10 @@ export function AddStepModal({
             </div>
           )}
 
-          {(type === 'loop' || type === 'branch' || type === 'switch') && (
+          {(type === 'loop' ||
+            type === 'branch' ||
+            type === 'switch' ||
+            type === 'group') && (
             <div className="mb-5">
               <div className="mb-1.5 font-mono text-[10px] text-fl-text-faint">
                 ラベル

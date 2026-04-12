@@ -122,7 +122,8 @@ export type StepType =
   | 'loop'
   | 'branch'
   | 'switch'
-  | 'subroutine';
+  | 'subroutine'
+  | 'group';
 
 /**
  * One step inside a Block's internal flowchart.
@@ -161,4 +162,5 @@ export const STEP_META: Record<
   branch: { color: '#F59E0B', icon: '⑂', label: '分岐' },
   switch: { color: '#EC4899', icon: '⧉', label: 'スイッチ' },
   subroutine: { color: '#94A3B8', icon: '⎔', label: 'サブルーチン' },
+  group: { color: '#6B7280', icon: '▤', label: 'グループ' },
 };

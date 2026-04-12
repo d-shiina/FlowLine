@@ -152,7 +152,10 @@ export function StepInspector({
   const onErrorKey = toKey(step.onError);
   const hasTimeout = step.timeout !== undefined;
   const isControlFlow =
-    step.type === 'loop' || step.type === 'branch' || step.type === 'switch';
+    step.type === 'loop' ||
+    step.type === 'branch' ||
+    step.type === 'switch' ||
+    step.type === 'group';
 
   return (
     <aside className="fl-scroll flex h-full w-[360px] flex-shrink-0 flex-col overflow-y-auto border-l border-fl-border bg-fl-panel">
@@ -248,6 +251,16 @@ export function StepInspector({
             options={subroutines.map((s) => ({ value: s.id, label: s.name }))}
             placeholder="サブルーチンを選択"
           />
+        </Section>
+      )}
+
+      {/* Group info */}
+      {step.type === 'group' && (
+        <Section>
+          <SLabel>GROUP</SLabel>
+          <div className="font-mono text-[10px] text-fl-text-muted">
+            {block.steps.filter((s) => s.parentStepId === step.id).length} 子ステップ
+          </div>
         </Section>
       )}
 
