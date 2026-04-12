@@ -4,6 +4,7 @@ import type { NodeManifestEntry } from '../../globals';
 import { Breadcrumb } from './Breadcrumb';
 import { FlowchartStepView, StepConnector } from './FlowchartStepView';
 import { AddStepModal } from './AddStepModal';
+import { StepInspector } from './StepInspector';
 
 interface Props {
   block: Block;
@@ -21,13 +22,12 @@ interface Props {
 /**
  * Vertical flowchart editor for a single Block's internal steps.
  *
- * Renders top-level steps (no parentStepId) as a vertical list
- * connected by arrow connectors. Control-flow steps (loop / branch
- * / switch) are shown as cards but their children are not yet
- * rendered inline — that comes in Phase 5.
+ * Two-column layout: the left column renders the visual step list
+ * (top-level steps connected by arrow connectors); the right column
+ * shows the StepInspector for the selected step.
  *
- * The Inspector integration is deferred to Phase 3; for now step
- * selection is tracked locally but no side panel is shown.
+ * Control-flow children (loop / branch / switch) are not yet rendered
+ * inline — that comes in Phase 5.
  */
 export function FlowchartEditor({
   block,
@@ -35,11 +35,21 @@ export function FlowchartEditor({
   trackColor,
   scenarioName,
   subroutines,
+  nodeManifest,
+  scenarioVariables,
   onBack,
   onUpdateBlock,
 }: Props) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [addStepOpen, setAddStepOpen] = useState(false);
+
+  const selectedStep = block.steps.find((s) => s.id === selectedStepId) ?? null;
+
+  const handleUpdateStep = (stepId: string, patch: Partial<Step>) => {
+    onUpdateBlock({
+      steps: block.steps.map((s) => (s.id === stepId ? { ...s, ...patch } : s)),
+    });
+  };
 
   const topLevelSteps = block.steps
     .filter((s) => !s.parentStepId)
@@ -79,9 +89,9 @@ export function FlowchartEditor({
         />
       </div>
 
-      {/* Main area */}
+      {/* Main area: step list (left) + inspector (right) */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Step list */}
+        {/* Left: visual flowchart */}
         <div
           className="fl-scroll flex-1 overflow-y-auto"
           onClick={() => setSelectedStepId(null)}
@@ -132,6 +142,16 @@ export function FlowchartEditor({
             </button>
           </div>
         </div>
+
+        {/* Right: step inspector */}
+        <StepInspector
+          step={selectedStep}
+          block={block}
+          nodeManifest={nodeManifest}
+          scenarioVariables={scenarioVariables}
+          subroutines={subroutines}
+          onUpdateStep={handleUpdateStep}
+        />
       </div>
 
       <AddStepModal
