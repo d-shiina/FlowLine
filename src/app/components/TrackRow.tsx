@@ -43,6 +43,7 @@ interface Props {
     rootBlockId: string,
     delta: number,
   ) => void;
+  onDoubleClickBlock: (trackId: string, blockId: string) => void;
 }
 
 export function TrackRow({
@@ -61,6 +62,7 @@ export function TrackRow({
   onSelectBlock,
   onCanvasClick,
   onMoveContainerTree,
+  onDoubleClickBlock,
 }: Props) {
   const [renaming, setRenaming] = useState(false);
   const [nameVal, setNameVal] = useState(track.name);
@@ -305,6 +307,10 @@ export function TrackRow({
               // click after mousedown/mouseup and without this it
               // still bubbles to the canvas onClick handler.
               onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                onDoubleClickBlock(track.id, f.block.id);
+              }}
             >
               {/* Header bar (visual only — the whole frame
                   catches mousedown, no per-element handler). */}
@@ -428,6 +434,7 @@ export function TrackRow({
               onSelect={onSelectBlock}
               onUpdate={onUpdateBlock}
               onDelete={onDeleteBlock}
+              onDoubleClick={onDoubleClickBlock}
             />
           );
         })}

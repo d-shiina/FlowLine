@@ -29,6 +29,7 @@ import type { PythonStatus } from '../globals';
 import { SubroutineSidebar } from './components/SubroutineSidebar';
 import { Inspector } from './components/Inspector';
 import { ExecutionLogPanel } from './components/ExecutionLogPanel';
+import { FlowchartEditor } from './components/FlowchartEditor';
 
 /**
  * Root application. Owns scenario state, playback, selection, and modals.
@@ -75,6 +76,28 @@ export default function App() {
         blocks: activeSubroutine.blocks,
       }
     : null;
+
+  // ─── flowchart editor navigation ──────────────────────────────────
+  const [editingBlock, setEditingBlock] = useState<{
+    trackId: string;
+    blockId: string;
+  } | null>(null);
+
+  // Resolve the block and its track for the flowchart editor.
+  const editingTrack = editingBlock
+    ? scenario.tracks.find((t) => t.id === editingBlock.trackId) ?? null
+    : null;
+  const editingBlockData = editingTrack
+    ? (editingTrack.blocks.find((b) => b.id === editingBlock?.blockId) ?? null)
+    : null;
+
+  // Auto-fallback: if the block disappears (undo / delete), close the editor.
+  useEffect(() => {
+    if (!editingBlock) return;
+    const track = scenario.tracks.find((t) => t.id === editingBlock.trackId);
+    const block = track?.blocks.find((b) => b.id === editingBlock.blockId);
+    if (!block) setEditingBlock(null);
+  }, [editingBlock, scenario.tracks]);
 
   // ─── execution engine ──────────────────────────────────────────────
   const execution = useExecution();
@@ -390,7 +413,11 @@ export default function App() {
       }
       const ctrl = e.ctrlKey || e.metaKey;
       if (e.key === 'Escape') {
-        setSelected(null);
+        if (editingBlock) {
+          setEditingBlock(null);
+        } else {
+          setSelected(null);
+        }
         return;
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
@@ -441,6 +468,7 @@ export default function App() {
   }, [
     selected,
     selectedBlock,
+    editingBlock,
     store,
     handleExport,
     handleImport,
@@ -514,7 +542,31 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      {/* Flowchart editor — replaces the entire main area */}
+      {editingBlock && editingBlockData && editingTrack && (
+        <div className="flex min-h-0 flex-1">
+          <FlowchartEditor
+            block={editingBlockData}
+            trackName={editingTrack.name}
+            trackColor={editingTrack.color}
+            scenarioName={scenario.name}
+            subroutines={scenario.subroutines}
+            nodeManifest={nodeManifest}
+            scenarioVariables={scenario.variables.scenario}
+            onBack={() => setEditingBlock(null)}
+            onUpdateBlock={(patch) => {
+              store.updateBlock(
+                editingBlock.trackId,
+                editingBlock.blockId,
+                patch,
+              );
+            }}
+            onCreateVariable={store.setVariable}
+          />
+        </div>
+      )}
+
+      <div className={`flex min-h-0 flex-1 ${editingBlock ? 'hidden' : ''}`}>
         <SubroutineSidebar
           subroutines={scenario.subroutines}
           activeSubroutineId={
@@ -608,6 +660,9 @@ export default function App() {
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
                     onMoveContainerTree={store.moveBlockTree}
+                    onDoubleClickBlock={(tid, bid) =>
+                      setEditingBlock({ trackId: tid, blockId: bid })
+                    }
                   />
                 ))}
 
@@ -664,6 +719,7 @@ export default function App() {
                   onSelectBlock={handleBlockClick}
                   onCanvasClick={handleCanvasClick}
                   onMoveContainerTree={store.moveBlockTree}
+                  onDoubleClickBlock={() => {/* error handler blocks don't open flowchart editor */}}
                 />
 
                 {/* Sync overlay + global playhead */}
@@ -712,6 +768,7 @@ export default function App() {
                     onSelectBlock={handleBlockClick}
                     onCanvasClick={handleCanvasClick}
                     onMoveContainerTree={store.moveBlockTree}
+                    onDoubleClickBlock={() => {/* subroutine blocks don't open flowchart editor in this phase */}}
                   />
                 </>
               )

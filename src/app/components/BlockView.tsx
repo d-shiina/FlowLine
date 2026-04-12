@@ -27,6 +27,7 @@ interface Props {
   onSelect: (trackId: string, blockId: string) => void;
   onUpdate: (trackId: string, blockId: string, patch: Partial<Block>) => void;
   onDelete: (trackId: string, blockId: string) => void;
+  onDoubleClick: (trackId: string, blockId: string) => void;
 }
 
 interface Badge {
@@ -112,6 +113,7 @@ export function BlockView({
   onSelect,
   onUpdate,
   onDelete,
+  onDoubleClick,
 }: Props) {
   const meta = BLOCK_META[block.type];
   const [hov, setHov] = useState(false);
@@ -404,6 +406,10 @@ export function BlockView({
         onClick={(e) => {
           e.stopPropagation();
           onSelect(trackId, block.id);
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onDoubleClick(trackId, block.id);
         }}
       >
         <div className="flex h-full flex-col justify-center gap-0.5 pr-1">
