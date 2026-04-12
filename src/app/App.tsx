@@ -499,46 +499,32 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-fl-bg font-mono text-fl-text">
-      <Titlebar />
-      <Toolbar
-        playing={playing}
-        onTogglePlay={togglePlay}
+      <Titlebar
+        scenarioName={scenario.name}
+        onRenameScenario={store.renameScenario}
         onImport={handleImport}
         onExport={handleExport}
         onSample={() => setSamplesOpen(true)}
+      />
+      <Toolbar
+        playing={playing}
+        onTogglePlay={togglePlay}
         onOpenNodeEditor={() => setNodeEditorOpen(true)}
         nodeCount={nodeManifest.length}
-        scenarioName={scenario.name}
-        onRenameScenario={store.renameScenario}
         theme={theme}
         onToggleTheme={toggleTheme}
         pythonState={pythonChipState}
         onOpenPythonInstall={() => setPythonModalOpen(true)}
+        editMode={mode === 'block' || mode === 'sync' ? mode : null}
       />
 
       <input
         ref={fileInputRef}
         type="file"
-        accept="application/json,.json"
+        accept=".fls,.json"
         onChange={handleFile}
         className="hidden"
       />
-
-      <div className="flex flex-shrink-0 gap-5 border-b border-fl-border bg-fl-panel px-5 py-1.5">
-        {mode === 'block' && (
-          <div className="text-[9px] text-[#3b82f6]">
-            ▶ キャンバスをクリックしてブロック配置
-          </div>
-        )}
-        {mode === 'sync' && (
-          <div className="text-[9px] text-[#f43f5e]">
-            ⬡ キャンバスをクリックして同期ポイント配置
-          </div>
-        )}
-        <div className="ml-auto text-[9px] text-fl-text-ghost">
-          ブロックドラッグ=スロット移動 / Ctrl+Z=元に戻す / Del=削除
-        </div>
-      </div>
 
       {/* Flowchart editor — replaces the entire main area */}
       {editingBlock && editingBlockData && editingTrack && (
