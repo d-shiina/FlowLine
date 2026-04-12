@@ -177,50 +177,97 @@ export function StepInspector({ step, block, nodeManifest, ... }: Props) {
 - 使用ノードのサマリ (`nodeId` を集計)
 - 「ステップをクリックして編集」ヒント
 
-### 3. `src/app/components/ui/Combobox.tsx` (新規 ~120行)
+### 3. `src/app/components/ui/Autocomplete.tsx` (新規 ~100行)
 
-ノードが増えるため、**AutoComplete 式の検索ピッカー**を汎用コンポーネントとして作る。
+`@base-ui/react/autocomplete` の薄いラッパー。Select.tsx と同じ要領でテーマを当てる。
 
 #### API
 
 ```tsx
-interface ComboboxOption {
+export interface AutocompleteOption {
   value: string;
   label: string;
-  group?: string;        // カテゴリグルーピング用
-  description?: string;  // 補足テキスト (optional)
+  group?: string;        // カテゴリグルーピング用 (Autocomplete.Group)
+  description?: string;  // ノード id など補足テキスト
 }
 
 interface Props {
   value: string;
   onValueChange: (value: string) => void;
-  options: ComboboxOption[];
+  options: AutocompleteOption[];
   placeholder?: string;
-  allowClear?: boolean;   // 選択解除ボタン
+  allowClear?: boolean;
 }
 ```
 
 #### 実装方針
 
-- `@base-ui/react` に Combobox はないため、**自前で実装**
-- `<input>` + filtered `<ul>` ドロップダウン (Portal で z-index 管理)
-- `group` プロパティがあればカテゴリヘッダを挿入 (sticky)
-- フィルタリング: `label` と `value` を case-insensitive 部分一致
-- キーボード: ↑↓ で移動、Enter で選択、Esc で閉じる
-- 空検索で全候補表示 (スクロール可能、max-h-[280px])
-- スタイル: 既存 `Select.tsx` のポップアップと統一感
+`@base-ui/react/autocomplete` を使う:
+
+```tsx
+import { Autocomplete } from '@base-ui/react/autocomplete';
+
+export function Autocomplete({ value, onValueChange, options, ... }) {
+  // group ごとにオプションをまとめる
+  const groups = groupBy(options, o => o.group ?? '');
+
+  return (
+    <Autocomplete.Root
+      items={options.map(o => o.value)}
+      value={value}
+      onValueChange={onValueChange}
+    >
+      <Autocomplete.InputGroup className="...">
+        <Autocomplete.Input placeholder={placeholder} className="..." />
+        {allowClear && value && <Autocomplete.Clear className="..." />}
+      </Autocomplete.InputGroup>
+
+      <Autocomplete.Portal>
+        <Autocomplete.Positioner sideOffset={4} className="z-[250]">
+          <Autocomplete.Popup className="max-h-[280px] overflow-y-auto ...">
+            <Autocomplete.List>
+              {Object.entries(groups).map(([groupName, items]) => (
+                <Autocomplete.Group key={groupName}>
+                  {groupName && (
+                    <Autocomplete.GroupLabel className="sticky top-0 ...">
+                      {groupName}
+                    </Autocomplete.GroupLabel>
+                  )}
+                  {items.map(opt => (
+                    <Autocomplete.Item key={opt.value} value={opt.value} className="...">
+                      <span>{opt.label}</span>
+                      {opt.description && (
+                        <span className="text-fl-text-ghost">{opt.description}</span>
+                      )}
+                    </Autocomplete.Item>
+                  ))}
+                </Autocomplete.Group>
+              ))}
+            </Autocomplete.List>
+            <Autocomplete.Empty className="...">見つかりません</Autocomplete.Empty>
+          </Autocomplete.Popup>
+        </Autocomplete.Positioner>
+      </Autocomplete.Portal>
+    </Autocomplete.Root>
+  );
+}
+```
+
+- フィルタリングは Base UI が自動処理 (入力値で items を絞り込む)
+- スタイルは Select.tsx のポップアップ (`bg-fl-modal`, `border-fl-border-strong` 等) に統一
+- `groupBy` はファイル内にシンプルな reducer で実装 (外部依存なし)
 
 #### ノードピッカーでの使い方
 
 ```tsx
-const nodeOptions: ComboboxOption[] = nodeManifest.map(n => ({
+const nodeOptions: AutocompleteOption[] = nodeManifest.map(n => ({
   value: n.id,
   label: n.label || n.id,
   group: n.category,
-  description: n.id,  // "desktop/click" を補足表示
+  description: n.id,   // "desktop/click" を小さく表示
 }));
 
-<Combobox
+<Autocomplete
   value={step.nodeId ?? ''}
   onValueChange={(nodeId) => onUpdateStep(step.id, { nodeId })}
   options={nodeOptions}
@@ -295,9 +342,9 @@ type PortBinding = { var: string } | { literal: unknown };
 ## 実装順序
 
 ```
-Step 1: Combobox.tsx         — 汎用 AutoComplete (他でも使える)
+Step 1: Autocomplete.tsx     — @base-ui/react/autocomplete ラッパー (他でも使える)
 Step 2: StepInspector.tsx    — メインパネル (骨格 + LabelSection + ErrorSection)
-Step 3: NodePicker 統合      — Combobox でノード選択
+Step 3: NodePicker 統合      — Autocomplete でノード選択
 Step 4: PortBindingsSection  — ポートバインディング UI
 Step 5: ConditionSection     — JsonLogicField 統合
 Step 6: SwitchCasesSection   — ケース管理
@@ -317,7 +364,7 @@ Step 7: FlowchartEditor 変更 — 2 カラムレイアウト + StepInspector �
 
 ## 注意
 
-- `Combobox.tsx` は `ui/` に配置し、Select.tsx と同じスタイルルールに従う
+- `Autocomplete.tsx` は `ui/` に配置し、Select.tsx と同じスタイルルールに従う
 - StepInspector は 300 行以内。セクションが大きくなる場合は
   `inspector/` サブディレクトリに分割する (既存パターン踏襲)
 - nodeManifest が空 (Python 未インストール) でも crash しないこと
