@@ -25,15 +25,17 @@ from flowline import node
     on_error="abort",
 )
 def run(ports, params, ctx):
-    from ._session import get_page
+    from ._session import run_on_browser, get_page
 
     url = ports["url"]
     wait = params.get("wait_until", "domcontentloaded")
     ctx.log("info", f"移動: {url}")
 
-    page = get_page()
-    page.goto(url, wait_until=wait)
+    def _do():
+        page = get_page()
+        page.goto(url, wait_until=wait)
+        return page.title()
 
-    title = page.title()
+    title = run_on_browser(_do)
     ctx.log("info", f"タイトル: {title}")
     return {"title": title}

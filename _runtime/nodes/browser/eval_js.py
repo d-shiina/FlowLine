@@ -17,22 +17,20 @@ from flowline import node
         "result": {"kind": "out", "type": "string"},
     },
     params={
-        "expression": {
-            "type": "string",
-            "default": "document.title",
-        },
+        "expression": {"type": "string", "default": "document.title"},
     },
     on_error="abort",
 )
 def run(ports, params, ctx):
-    from ._session import get_page
+    from ._session import run_on_browser, get_page
 
     expression = params.get("expression", "document.title")
     ctx.log("info", f"JS実行: {expression[:60]}")
 
-    page = get_page()
-    result = page.evaluate(expression)
+    def _do():
+        return get_page().evaluate(expression)
 
+    result = run_on_browser(_do)
     result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
     ctx.log("info", f"結果: {result_str[:80]}")
     return {"result": result_str}

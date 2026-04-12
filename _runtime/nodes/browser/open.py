@@ -20,22 +20,20 @@ from flowline import node
             "type": "string",
             "default": "https://www.google.com",
         },
-        "headless": {
-            "type": "boolean",
-            "default": False,
-        },
     },
     on_error="abort",
 )
 def run(ports, params, ctx):
-    from ._session import get_page
+    from ._session import run_on_browser, get_page
 
     url = ports.get("url") or params.get("url", "https://www.google.com")
     ctx.log("info", f"ブラウザを開いています: {url}")
 
-    page = get_page()
-    page.goto(url, wait_until="domcontentloaded")
+    def _do():
+        page = get_page()
+        page.goto(url, wait_until="domcontentloaded")
+        return page.title()
 
-    title = page.title()
+    title = run_on_browser(_do)
     ctx.log("info", f"ページタイトル: {title}")
     return {"title": title}

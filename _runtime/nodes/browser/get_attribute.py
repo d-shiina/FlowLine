@@ -16,27 +16,22 @@ from flowline import node
         "value": {"kind": "out", "type": "string"},
     },
     params={
-        "selector": {
-            "type": "string",
-            "default": "",
-        },
-        "attribute": {
-            "type": "string",
-            "default": "href",
-        },
+        "selector": {"type": "string", "default": ""},
+        "attribute": {"type": "string", "default": "href"},
     },
     on_error="abort",
 )
 def run(ports, params, ctx):
-    from ._session import get_page
+    from ._session import run_on_browser, get_page
 
     selector = ports.get("selector") or params.get("selector", "")
     attr = params.get("attribute", "href")
     if not selector:
         raise ValueError("selector が未指定です")
 
-    page = get_page()
-    value = page.get_attribute(selector, attr) or ""
+    def _do():
+        return get_page().get_attribute(selector, attr) or ""
 
+    value = run_on_browser(_do)
     ctx.log("info", f"取得: {selector}[{attr}] → '{value[:50]}'")
     return {"value": value}

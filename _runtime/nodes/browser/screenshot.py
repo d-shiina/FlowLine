@@ -18,27 +18,15 @@ from flowline import node
         "path": {"kind": "out", "type": "string"},
     },
     params={
-        "save_dir": {
-            "type": "string",
-            "default": "",
-        },
-        "filename": {
-            "type": "string",
-            "default": "",
-        },
-        "selector": {
-            "type": "string",
-            "default": "",
-        },
-        "full_page": {
-            "type": "boolean",
-            "default": False,
-        },
+        "save_dir": {"type": "string", "default": ""},
+        "filename": {"type": "string", "default": ""},
+        "selector": {"type": "string", "default": ""},
+        "full_page": {"type": "boolean", "default": False},
     },
     on_error="abort",
 )
 def run(ports, params, ctx):
-    from ._session import get_page
+    from ._session import run_on_browser, get_page
 
     save_dir = params.get("save_dir", "") or os.path.expanduser("~/Desktop")
     filename = params.get("filename", "") or f"flowline_{int(time.time())}.png"
@@ -51,18 +39,17 @@ def run(ports, params, ctx):
     filepath = os.path.join(save_dir, filename)
     os.makedirs(save_dir, exist_ok=True)
 
-    page = get_page()
-
-    if selector:
-        ctx.log("info", f"要素のスクリーンショット: {selector}")
-        element = page.query_selector(selector)
-        if element:
+    def _do():
+        page = get_page()
+        if selector:
+            element = page.query_selector(selector)
+            if not element:
+                raise ValueError(f"要素が見つかりません: {selector}")
             element.screenshot(path=filepath)
         else:
-            raise ValueError(f"要素が見つかりません: {selector}")
-    else:
-        ctx.log("info", f"ページ全体のスクリーンショット")
-        page.screenshot(path=filepath, full_page=full_page)
+            page.screenshot(path=filepath, full_page=full_page)
 
+    ctx.log("info", f"スクリーンショット撮影中")
+    run_on_browser(_do)
     ctx.log("info", f"保存: {filepath}")
     return {"path": filepath}

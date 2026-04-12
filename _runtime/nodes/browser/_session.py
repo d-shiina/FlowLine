@@ -1,49 +1,55 @@
 """Shared browser session manager for FLOWLINE browser nodes.
 
-Manages a single Playwright browser instance that persists across
-node invocations within a scenario run. Nodes call ``get_page()``
-to obtain the active page, and ``close()`` to tear down at the end.
+Playwright's sync_api is greenlet-based and must run on the same
+thread where it was started. Since the FLOWLINE worker dispatches
+each node invocation on a fresh thread, we run Playwright on a
+dedicated long-lived thread and route all calls through it.
 
-The session is lazily initialized on first use — no browser launches
-until a browser node actually runs.
+Nodes call ``run_on_browser(fn)`` which marshals ``fn`` to the
+browser thread, waits for the result, and returns it.
 """
 
 from __future__ import annotations
 
-from typing import Optional
+import threading
+from concurrent.futures import Future
+from queue import Queue
+from typing import Any, Callable, Optional, TypeVar
 
-# Playwright is imported lazily so the worker can boot even if
-# playwright isn't installed yet. Nodes that need it will get a
-# clear error message.
+T = TypeVar("T")
+
+_browser_thread: Optional[threading.Thread] = None
+_task_queue: Queue[Optional[tuple]] = Queue()
+
+# Playwright objects — only accessed from the browser thread.
+_pw = None
 _browser = None
 _context = None
 _page = None
 
 
-def get_page():
-    """Return the active Playwright page, launching the browser if needed."""
-    global _browser, _context, _page
-    if _page is not None:
-        return _page
+def _browser_loop():
+    """Runs on the dedicated browser thread. Processes tasks from the queue."""
+    global _pw, _browser, _context, _page
 
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        raise RuntimeError(
-            "playwright がインストールされていません。\n"
-            "pip install playwright && playwright install chromium"
-        )
+    while True:
+        item = _task_queue.get()
+        if item is None:
+            # Shutdown signal.
+            _cleanup()
+            break
 
-    pw = sync_playwright().start()
-    _browser = pw.chromium.launch(headless=False)
-    _context = _browser.new_context()
-    _page = _context.new_page()
-    return _page
+        fn, future = item
+        try:
+            result = fn()
+            future.set_result(result)
+        except Exception as exc:
+            future.set_exception(exc)
 
 
-def close():
-    """Close the browser session. Safe to call multiple times."""
-    global _browser, _context, _page
+def _cleanup():
+    """Close Playwright resources. Called on the browser thread."""
+    global _pw, _browser, _context, _page
     if _page:
         try:
             _page.close()
@@ -62,3 +68,66 @@ def close():
         except Exception:
             pass
         _browser = None
+    if _pw:
+        try:
+            _pw.stop()
+        except Exception:
+            pass
+        _pw = None
+
+
+def _ensure_thread():
+    """Start the browser thread if it hasn't been started yet."""
+    global _browser_thread
+    if _browser_thread is not None and _browser_thread.is_alive():
+        return
+    _browser_thread = threading.Thread(
+        target=_browser_loop, daemon=True, name="flowline-browser"
+    )
+    _browser_thread.start()
+
+
+def run_on_browser(fn: Callable[[], T]) -> T:
+    """Execute ``fn`` on the dedicated browser thread and return its result.
+
+    This is the only public entry point nodes should use. The callable
+    has access to ``get_page()`` and all Playwright APIs because it
+    runs on the correct thread.
+    """
+    _ensure_thread()
+    future: Future[T] = Future()
+    _task_queue.put((fn, future))
+    return future.result(timeout=120)
+
+
+def get_page():
+    """Return the active Playwright page, launching the browser if needed.
+
+    MUST be called from the browser thread (inside ``run_on_browser``).
+    """
+    global _pw, _browser, _context, _page
+    if _page is not None:
+        return _page
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError(
+            "playwright がインストールされていません。\n"
+            "下部パネルの「パッケージ」タブからインストールしてください。"
+        )
+
+    _pw = sync_playwright().start()
+    _browser = _pw.chromium.launch(headless=False)
+    _context = _browser.new_context()
+    _page = _context.new_page()
+    return _page
+
+
+def close():
+    """Close the browser session. Safe to call from any thread."""
+    global _browser_thread
+    if _browser_thread is not None and _browser_thread.is_alive():
+        _task_queue.put(None)  # Shutdown signal
+        _browser_thread.join(timeout=10)
+        _browser_thread = None

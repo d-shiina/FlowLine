@@ -15,19 +15,13 @@ from flowline import node
         "selector": {"kind": "in", "type": "string", "required": True},
     },
     params={
-        "selector": {
-            "type": "string",
-            "default": "",
-        },
-        "timeout": {
-            "type": "number",
-            "default": 10000,
-        },
+        "selector": {"type": "string", "default": ""},
+        "timeout": {"type": "number", "default": 10000},
     },
     on_error="abort",
 )
 def run(ports, params, ctx):
-    from ._session import get_page
+    from ._session import run_on_browser, get_page
 
     selector = ports.get("selector") or params.get("selector", "")
     if not selector:
@@ -36,8 +30,9 @@ def run(ports, params, ctx):
     timeout = int(params.get("timeout", 10000))
     ctx.log("info", f"クリック: {selector}")
 
-    page = get_page()
-    page.click(selector, timeout=timeout)
+    def _do():
+        get_page().click(selector, timeout=timeout)
 
+    run_on_browser(_do)
     ctx.log("info", "クリック完了")
     return {}

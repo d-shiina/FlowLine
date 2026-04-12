@@ -17,14 +17,8 @@ from flowline import node
         "selected": {"kind": "out", "type": "string"},
     },
     params={
-        "selector": {
-            "type": "string",
-            "default": "",
-        },
-        "value": {
-            "type": "string",
-            "default": "",
-        },
+        "selector": {"type": "string", "default": ""},
+        "value": {"type": "string", "default": ""},
         "by": {
             "type": "enum",
             "choices": ["value", "label", "index"],
@@ -34,24 +28,24 @@ from flowline import node
     on_error="abort",
 )
 def run(ports, params, ctx):
-    from ._session import get_page
+    from ._session import run_on_browser, get_page
 
     selector = ports.get("selector") or params.get("selector", "")
     value = ports.get("value") or params.get("value", "")
     by = params.get("by", "value")
-
     if not selector:
         raise ValueError("selector が未指定です")
 
-    page = get_page()
+    def _do():
+        page = get_page()
+        if by == "label":
+            return page.select_option(selector, label=value)
+        elif by == "index":
+            return page.select_option(selector, index=int(value))
+        else:
+            return page.select_option(selector, value=value)
 
-    if by == "label":
-        result = page.select_option(selector, label=value)
-    elif by == "index":
-        result = page.select_option(selector, index=int(value))
-    else:
-        result = page.select_option(selector, value=value)
-
+    result = run_on_browser(_do)
     selected = result[0] if result else ""
     ctx.log("info", f"選択: {selector} → '{selected}'")
     return {"selected": selected}
