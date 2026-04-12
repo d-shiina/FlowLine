@@ -1,20 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronUp,
   Terminal,
   Filter,
   Variable,
+  Package,
   Plus,
   Trash2,
 } from 'lucide-react';
 import type { ExecutionPhase, LogEntry } from '../engine';
 import type { Track } from '../types';
 import { describeType, formatLiteral, parseLiteral } from '../valueLiteral';
+import { PackageManager } from './PackageManager';
 
 // ── Shared types ─────────────────────────────
 
-type TabId = 'log' | 'variables';
+type TabId = 'log' | 'variables' | 'packages';
 
 interface Props {
   logs: LogEntry[];
@@ -156,6 +158,17 @@ export function BottomPanel({
               {varCount}
             </span>
           </button>
+          <button
+            type="button"
+            className={tabButtonClass('packages')}
+            onClick={() => {
+              setActiveTab('packages');
+              setExpanded(true);
+            }}
+          >
+            <Package className="h-2.5 w-2.5" />
+            パッケージ
+          </button>
         </div>
 
         {/* Status summary */}
@@ -195,7 +208,7 @@ export function BottomPanel({
       {/* Panel body */}
       {expanded && (
         <div className="border-t border-fl-border bg-fl-bg">
-          {activeTab === 'log' ? (
+          {activeTab === 'log' && (
             <LogTabContent
               logs={filteredLogs}
               allLogs={logs}
@@ -207,7 +220,8 @@ export function BottomPanel({
               setShowFilter={setShowFilter}
               scrollRef={scrollRef}
             />
-          ) : (
+          )}
+          {activeTab === 'variables' && (
             <VariablesTabContent
               variables={variables}
               runtimeSnapshot={runtimeSnapshot}
@@ -216,10 +230,32 @@ export function BottomPanel({
               onDelete={onDeleteVariable}
             />
           )}
+          {activeTab === 'packages' && (
+            <PackagesTabContent />
+          )}
         </div>
       )}
     </div>
   );
+}
+
+// ── Packages tab ─────────────────────────────
+
+function PackagesTabContent() {
+  const [packages, setPackages] = useState<string[]>([]);
+
+  const refresh = useCallback(async () => {
+    const runtime = window.flowlineRuntime;
+    if (!runtime) return;
+    const result = await runtime.pipList();
+    if (result.ok) setPackages(result.packages);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return <PackageManager installedPackages={packages} onRefresh={refresh} />;
 }
 
 // ── Log tab ──────────────────────────────────

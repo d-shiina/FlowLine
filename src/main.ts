@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
-import { detectPython, installPython } from './main/pythonRuntime';
+import { detectPython, installPython, pipInstall, pipList } from './main/pythonRuntime';
 import {
   cancelNode,
   ensureWorkerReady,
@@ -239,6 +239,26 @@ ipcMain.handle('scenario:import', async (e) => {
       updatedNodes: [],
       skippedNodes: [],
     };
+  }
+});
+
+// ── pip install handlers ─────────────────────────────
+ipcMain.handle(
+  'runtime:pip-install',
+  async (e, packages: string[], postCommands?: string[][]) => {
+    try {
+      return await pipInstall(e.sender, packages, postCommands);
+    } catch (err) {
+      return { ok: false, output: '', error: (err as Error).message ?? String(err) };
+    }
+  },
+);
+
+ipcMain.handle('runtime:pip-list', async () => {
+  try {
+    return { ok: true, packages: await pipList() };
+  } catch (err) {
+    return { ok: false, packages: [], error: (err as Error).message ?? String(err) };
   }
 });
 

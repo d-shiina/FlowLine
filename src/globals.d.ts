@@ -123,6 +123,12 @@ export interface FlowlineRuntimeAPI {
   deleteNodeSource(
     relPath: string,
   ): Promise<{ ok: true } | { ok: false; error: string }>;
+  pipInstall(
+    packages: string[],
+    postCommands?: string[][],
+  ): Promise<{ ok: boolean; output: string; error?: string }>;
+  pipList(): Promise<{ ok: boolean; packages: string[]; error?: string }>;
+  onPipProgress(cb: (event: { message: string }) => void): () => void;
   reloadNodes(): Promise<
     | { ok: true; manifest: NodeManifestEntry[]; loadErrors: NodeLoadError[] }
     | { ok: false; error: string }

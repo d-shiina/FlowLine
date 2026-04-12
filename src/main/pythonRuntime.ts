@@ -302,3 +302,103 @@ function runAndCheck(bin: string, args: string[]): Promise<void> {
     });
   });
 }
+
+// ──────────────────────────────────────────────────────────────────
+// pip install
+// ──────────────────────────────────────────────────────────────────
+
+export interface PipInstallResult {
+  ok: boolean;
+  output: string;
+  error?: string;
+}
+
+/**
+ * Run ``pip install <packages>`` inside the isolated Python runtime,
+ * then run optional post-install commands (e.g. ``playwright install chromium``).
+ *
+ * Progress is streamed to the sender via ``runtime:pip-progress`` events.
+ */
+export async function pipInstall(
+  sender: WebContents,
+  packages: string[],
+  postCommands?: string[][],
+): Promise<PipInstallResult> {
+  const status = await detectPython();
+  if (!status.pythonPath) {
+    return { ok: false, output: '', error: 'Python ランタイムが未インストールです' };
+  }
+
+  const exe = status.pythonPath;
+  let fullOutput = '';
+
+  const emitProgress = (message: string) => {
+    if (sender && !sender.isDestroyed()) {
+      sender.send('runtime:pip-progress', { message });
+    }
+  };
+
+  // Run pip install
+  try {
+    emitProgress(`pip install ${packages.join(' ')} ...`);
+    const pipOutput = await runCommand(exe, ['-m', 'pip', 'install', ...packages]);
+    fullOutput += pipOutput + '\n';
+    emitProgress('pip install 完了');
+  } catch (err) {
+    const msg = (err as Error).message ?? String(err);
+    return { ok: false, output: fullOutput, error: `pip install 失敗: ${msg}` };
+  }
+
+  // Run post-install commands
+  if (postCommands) {
+    for (const args of postCommands) {
+      try {
+        const label = args.join(' ');
+        emitProgress(`${label} ...`);
+        // If first arg is the package name, run it as a python module
+        const output = await runCommand(exe, ['-m', ...args]);
+        fullOutput += output + '\n';
+        emitProgress(`${label} 完了`);
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        return { ok: false, output: fullOutput, error: `${args.join(' ')} 失敗: ${msg}` };
+      }
+    }
+  }
+
+  return { ok: true, output: fullOutput };
+}
+
+/** Run a command and return combined stdout+stderr. */
+function runCommand(bin: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 300_000, // 5 min max
+    });
+    let out = '';
+    child.stdout.on('data', (b: Buffer) => (out += b.toString()));
+    child.stderr.on('data', (b: Buffer) => (out += b.toString()));
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) resolve(out);
+      else reject(new Error(`exit ${code}: ${out.slice(-500)}`));
+    });
+  });
+}
+
+/**
+ * List installed pip packages. Returns a list of ``name==version`` strings.
+ */
+export async function pipList(): Promise<string[]> {
+  const status = await detectPython();
+  if (!status.pythonPath) return [];
+  try {
+    const output = await runCommand(status.pythonPath, [
+      '-m', 'pip', 'list', '--format=freeze',
+    ]);
+    return output.trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}

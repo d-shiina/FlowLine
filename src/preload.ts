@@ -107,6 +107,20 @@ contextBridge.exposeInMainWorld('flowlineRuntime', {
   /** Delete a node source file. Missing files succeed silently. */
   deleteNodeSource: (relPath: string) =>
     ipcRenderer.invoke('runtime:delete-node', relPath),
+  /**
+   * Install Python packages via pip. ``postCommands`` are run after
+   * pip install (e.g. ``[["playwright", "install", "chromium"]]``).
+   */
+  pipInstall: (packages: string[], postCommands?: string[][]) =>
+    ipcRenderer.invoke('runtime:pip-install', packages, postCommands),
+  /** List installed pip packages as ``name==version`` strings. */
+  pipList: () => ipcRenderer.invoke('runtime:pip-list'),
+  /** Subscribe to pip install progress messages. */
+  onPipProgress: (cb: (event: { message: string }) => void) => {
+    const handler = (_: unknown, p: { message: string }) => cb(p);
+    ipcRenderer.on('runtime:pip-progress', handler);
+    return () => ipcRenderer.off('runtime:pip-progress', handler);
+  },
   /** Re-scan _runtime/nodes/ and rebuild the worker registry. */
   reloadNodes: () => ipcRenderer.invoke('runtime:reload-nodes'),
   /** Fetch the most recent load-error list reported by the worker. */
