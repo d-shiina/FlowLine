@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Play, X } from 'lucide-react';
 import type { PortBinding, Step } from '../types';
 import { STEP_META } from '../types';
 import type { BlockStatus } from '../engine';
@@ -156,29 +157,10 @@ export function FlowchartStepView({
           {step.label}
         </span>
 
-        {hov ? (
-          <div className="flex gap-0.5">
-            {onRunStep && (
-              <button
-                type="button"
-                className="flex h-4 w-4 items-center justify-center rounded text-[7px] text-white"
-                style={{ background: '#22c55e' }}
-                onMouseDown={(e) => { e.stopPropagation(); onRunStep(step.id); }}
-              >
-                ▶
-              </button>
-            )}
-            <button
-              type="button"
-              className="flex h-4 w-4 items-center justify-center rounded bg-red-500/80 text-[8px] text-white"
-              onMouseDown={(e) => { e.stopPropagation(); onDelete(step.id); }}
-            >
-              ✕
-            </button>
-          </div>
-        ) : (isRunning || isOk || isError || isSkipped) ? (
+        {/* Status indicator */}
+        {(isRunning || isOk || isError || isSkipped) && (
           <span
-            className="rounded px-1 py-px text-[7px] font-bold"
+            className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[8px] font-bold"
             style={{
               background: isError ? '#ef4444' : isRunning ? '#22c55e' : isOk ? `${meta.color}44` : '#94a3b844',
               color: isError || isRunning ? '#fff' : 'var(--fl-text-dim)',
@@ -186,7 +168,35 @@ export function FlowchartStepView({
           >
             {isRunning ? '●' : isOk ? '✓' : isError ? '✕' : '–'}
           </span>
-        ) : null}
+        )}
+
+        {/* Action icons — always visible, stop propagation on mousedown */}
+        {onRunStep && (
+          <button
+            type="button"
+            className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-fl-text-faint transition-colors hover:bg-[#22c55e22] hover:text-[#22c55e]"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRunStep(step.id);
+            }}
+            title="このステップを実行"
+          >
+            <Play className="h-2.5 w-2.5 fill-current" />
+          </button>
+        )}
+        <button
+          type="button"
+          className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-fl-text-faint transition-colors hover:bg-red-500/20 hover:text-red-500"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(step.id);
+          }}
+          title="削除"
+        >
+          <X className="h-3 w-3" />
+        </button>
       </div>
 
       {/* ── Params (always visible when node assigned) ── */}
