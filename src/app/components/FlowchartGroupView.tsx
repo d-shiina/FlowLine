@@ -22,7 +22,6 @@ interface Props {
   onDelete: (stepId: string) => void;
   onUpdate?: (stepId: string, patch: Partial<Step>) => void;
   onAddChild: () => void;
-  onDragStart?: (stepId: string, e: React.MouseEvent) => void;
   onRunStep?: (stepId: string) => void;
   /** Map of nodeId → manifest entry for child step rendering. */
   manifestMap?: Map<string, NodeManifestEntry>;
@@ -47,7 +46,6 @@ export function FlowchartGroupView({
   onDelete,
   onUpdate,
   onAddChild,
-  onDragStart,
   onRunStep,
   manifestMap,
 }: Props) {
@@ -130,10 +128,8 @@ export function FlowchartGroupView({
                     status={executionStatus?.[child.id] ?? 'idle'}
                     nodeManifest={child.nodeId && manifestMap ? manifestMap.get(child.nodeId) : undefined}
                     scenarioVariables={scenarioVariables ?? {}}
-                    onSelect={onSelect}
                     onDelete={onDelete}
                     onUpdate={onUpdate ?? (() => {})}
-                    onDragStart={onDragStart}
                     onRunStep={onRunStep}
                   />
                 </div>

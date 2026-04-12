@@ -11,10 +11,8 @@ interface Props {
   status: BlockStatus;
   nodeManifest?: NodeManifestEntry;
   scenarioVariables: Record<string, unknown>;
-  onSelect: (stepId: string) => void;
   onDelete: (stepId: string) => void;
   onUpdate: (stepId: string, patch: Partial<Step>) => void;
-  onDragStart?: (stepId: string, e: React.MouseEvent) => void;
   onRunStep?: (stepId: string) => void;
 }
 
@@ -29,10 +27,8 @@ export function FlowchartStepView({
   status,
   nodeManifest: node,
   scenarioVariables,
-  onSelect,
   onDelete,
   onUpdate,
-  onDragStart,
   onRunStep,
 }: Props) {
   const [hov, setHov] = useState(false);
@@ -131,17 +127,10 @@ export function FlowchartStepView({
         {varKeys.map((k) => <option key={k} value={k} />)}
       </datalist>
 
-      {/* ── Header (draggable) ── */}
+      {/* ── Header (ReactFlow handles dragging on the parent node) ── */}
       <div
-        className="flex cursor-grab items-center gap-1.5 rounded-t-[5px] px-2.5 py-1.5 active:cursor-grabbing"
+        className="drag-handle flex cursor-grab items-center gap-1.5 rounded-t-[5px] px-2.5 py-1.5 active:cursor-grabbing"
         style={{ background: `${accent}18` }}
-        onMouseDown={(e) => {
-          if (e.button === 0 && onDragStart) onDragStart(step.id, e);
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onSelect(step.id);
-        }}
       >
         <span
           className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-[9px] font-bold"
