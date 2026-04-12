@@ -88,3 +88,4 @@ Sonnet に実装を依頼する場合: 該当タスクファイルだけ読ま�
 | `tasks/phase4-executor.md` | Phase 4: Step ベース実行エンジン | 未着手 |
 | `tasks/phase5-timeline-cleanup.md` | Phase 5: 旧モデル削除 + タイムライン簡素化 | 未着手 |
 | `tasks/sync-visual.md` | 同期ポイント視覚改善 (破線バリア) | 未着手 |
+| `tasks/step-inspector.md` | ステップインスペクター + フローチャート画面活用 | 未着手 |
