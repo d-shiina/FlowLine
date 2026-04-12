@@ -189,8 +189,8 @@ export function FlowchartStepView({
         ) : null}
       </div>
 
-      {/* ── Params (inline editable) ── */}
-      {params.length > 0 && selected && (
+      {/* ── Params (always visible when node assigned) ── */}
+      {params.length > 0 && (
         <div className="border-t border-fl-border px-2 py-1.5">
           {params.map(([name, def]) => {
             const pDef = def as Record<string, unknown>;
@@ -249,20 +249,14 @@ export function FlowchartStepView({
                 <span className="w-[60px] flex-shrink-0 font-mono text-[9px] text-fl-text-dim">
                   {name}
                 </span>
-                {selected ? (
-                  <input
-                    list={datalistId}
-                    value={val}
-                    onChange={(e) => setBinding(name, e.target.value, false)}
-                    placeholder="scenario.xxx / 値"
-                    className="min-w-0 flex-1 rounded border border-fl-border bg-fl-bg px-1.5 py-0.5 font-mono text-[9px] text-fl-text outline-none focus:border-fl-text-dim"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="truncate font-mono text-[8px] text-fl-text-ghost">
-                    {val || '—'}
-                  </span>
-                )}
+                <input
+                  list={datalistId}
+                  value={val}
+                  onChange={(e) => setBinding(name, e.target.value, false)}
+                  placeholder="scenario.xxx / 値"
+                  className="min-w-0 flex-1 rounded border border-fl-border bg-fl-bg px-1.5 py-0.5 font-mono text-[9px] text-fl-text outline-none focus:border-fl-text-dim"
+                  onClick={(e) => e.stopPropagation()}
+                />
               </div>
             );
           })}
@@ -271,20 +265,14 @@ export function FlowchartStepView({
             const bound = !!val;
             return (
               <div key={name} className="flex items-center justify-end gap-1.5 py-0.5">
-                {selected ? (
-                  <input
-                    list={datalistId}
-                    value={val}
-                    onChange={(e) => setBinding(name, e.target.value, true)}
-                    placeholder="scenario.xxx"
-                    className="min-w-0 flex-1 rounded border border-fl-border bg-fl-bg px-1.5 py-0.5 text-right font-mono text-[9px] text-fl-text outline-none focus:border-fl-text-dim"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="truncate font-mono text-[8px] text-fl-text-ghost">
-                    {val || '—'}
-                  </span>
-                )}
+                <input
+                  list={datalistId}
+                  value={val}
+                  onChange={(e) => setBinding(name, e.target.value, true)}
+                  placeholder="scenario.xxx"
+                  className="min-w-0 flex-1 rounded border border-fl-border bg-fl-bg px-1.5 py-0.5 text-right font-mono text-[9px] text-fl-text outline-none focus:border-fl-text-dim"
+                  onClick={(e) => e.stopPropagation()}
+                />
                 <span className="font-mono text-[9px] text-fl-text-dim">{name}</span>
                 <span
                   className="inline-block h-[6px] w-[6px] flex-shrink-0 rounded-full"

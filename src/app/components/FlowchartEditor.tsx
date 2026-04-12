@@ -355,23 +355,15 @@ export function FlowchartEditor({
             className="fl-scroll flex-1 overflow-auto"
             onClick={() => setSelectedIds([])}
           >
-            <div className="flex min-h-full items-start gap-0 px-6 py-6">
-              {/* Track label */}
-              <div
-                className="mr-4 flex flex-shrink-0 items-center gap-2 self-center font-mono text-[10px] font-bold"
-                style={{ color: trackColor }}
-              >
-                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: trackColor }} />
-                {block.label}
-              </div>
+            <div className="inline-flex min-h-full min-w-full items-center gap-0 px-6 py-6">
 
-              {topLevelSteps.length === 0 ? (
-                <div className="self-center rounded-lg border border-dashed border-fl-border-strong bg-fl-panel-2 px-6 py-4 text-center font-mono text-[10px] text-fl-text-faint">
-                  まだステップがありません
+              {topLevelSteps.length === 0 && (
+                <div className="flex-shrink-0 rounded-lg border border-dashed border-fl-border-strong bg-fl-panel-2 px-6 py-4 text-center font-mono text-[10px] text-fl-text-faint">
+                  ステップを追加してください →
                 </div>
-              ) : (
-                topLevelSteps.map((step, i) => (
-                  <div key={step.id} className="flex flex-shrink-0 items-start" data-step-id={step.id}>
+              )}
+              {topLevelSteps.map((step, i) => (
+                  <div key={step.id} className="flex flex-shrink-0 items-center" data-step-id={step.id}>
                     {i > 0 && <StepConnector />}
                     {/* Drop insert indicator */}
                     {dropInsertIndex === i && dragStepId !== step.id && (
@@ -412,8 +404,7 @@ export function FlowchartEditor({
                       />
                     )}
                   </div>
-                ))
-              )}
+              ))}
 
               {/* Drop at end indicator */}
               {dropInsertIndex === topLevelSteps.length && (
@@ -421,18 +412,21 @@ export function FlowchartEditor({
               )}
 
               {/* Add button */}
-              {topLevelSteps.length > 0 && <StepConnector />}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setAddStepParent(undefined);
-                  setAddStepOpen(true);
-                }}
-                className="flex-shrink-0 self-center rounded-lg border border-dashed border-fl-border-strong bg-transparent px-3 py-2 font-mono text-[10px] text-fl-text-faint transition-colors hover:border-[#3b82f6] hover:text-[#3b82f6]"
-              >
-                + 追加
-              </button>
+              <div className="flex flex-shrink-0 items-center">
+                {topLevelSteps.length > 0 && <StepConnector />}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAddStepParent(undefined);
+                    setAddStepOpen(true);
+                  }}
+                  className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-fl-border-strong bg-transparent font-mono text-[16px] text-fl-text-faint transition-colors hover:border-[#3b82f6] hover:text-[#3b82f6]"
+                  title="ステップを追加"
+                >
+                  +
+                </button>
+              </div>
             </div>
           </div>
         </FlowchartContextMenu>
