@@ -17,7 +17,7 @@ export function StepGhost({ step, x, y }: Props) {
 
   return createPortal(
     <div
-      className="pointer-events-none fixed z-[10000] w-[240px] rounded-lg"
+      className="pointer-events-none fixed z-[10000] w-[260px] rounded-lg"
       style={{
         left: x,
         top: y,

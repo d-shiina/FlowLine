@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import type { Step } from '../types';
 import { STEP_META } from '../types';
 import type { BlockStatus } from '../engine';
+import type { NodeManifestEntry } from '../../globals';
 import { FlowchartStepView, StepConnector } from './FlowchartStepView';
 
 interface Props {
@@ -21,6 +22,8 @@ interface Props {
   onAddChild: () => void;
   onDragStart?: (stepId: string, e: React.MouseEvent) => void;
   onRunStep?: (stepId: string) => void;
+  /** Map of nodeId → manifest entry for child step rendering. */
+  manifestMap?: Map<string, NodeManifestEntry>;
 }
 
 const meta = STEP_META.group;
@@ -42,6 +45,7 @@ export function FlowchartGroupView({
   onAddChild,
   onDragStart,
   onRunStep,
+  manifestMap,
 }: Props) {
   const borderColor = dropTarget
     ? '#3b82f6'
@@ -120,6 +124,7 @@ export function FlowchartGroupView({
                     step={child}
                     selected={selectedStepId === child.id}
                     status={executionStatus?.[child.id] ?? 'idle'}
+                    nodeManifest={child.nodeId && manifestMap ? manifestMap.get(child.nodeId) : undefined}
                     onSelect={onSelect}
                     onDelete={onDelete}
                     onDragStart={onDragStart}

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Block, Step, Subroutine } from '../types';
 import type { BlockStatus } from '../engine';
 import type { NodeManifestEntry } from '../../globals';
@@ -173,6 +173,13 @@ export function FlowchartEditor({
       ? Math.max(...block.steps.map((s) => s.order)) + 1
       : 0;
 
+  // Lookup map for resolving step.nodeId → NodeManifestEntry.
+  const manifestMap = useMemo(() => {
+    const m = new Map<string, typeof nodeManifest[number]>();
+    for (const n of nodeManifest) m.set(n.id, n);
+    return m;
+  }, [nodeManifest]);
+
   // ── Step mutations ─────────────────────────
 
   const handleUpdateStep = (stepId: string, patch: Partial<Step>) => {
@@ -195,6 +202,9 @@ export function FlowchartEditor({
         ),
       });
       setSelectedIds((prev) => prev.filter((id) => id !== stepId));
+      setDragStepId((prev) => (prev === stepId ? null : prev));
+      setGhostPos(null);
+      setDropTarget(null);
     },
     [block.steps, onUpdateBlock],
   );
@@ -743,12 +753,14 @@ export function FlowchartEditor({
                       }}
                       onDragStart={handleDragStart}
                       onRunStep={onRunStep && !running ? onRunStep : undefined}
+                      manifestMap={manifestMap}
                     />
                   ) : (
                     <FlowchartStepView
                       step={step}
                       selected={selectedIds.includes(step.id)}
                       status={executionStatus[step.id] ?? 'idle'}
+                      nodeManifest={step.nodeId ? manifestMap.get(step.nodeId) : undefined}
                       onSelect={(id) => handleSelect(id)}
                       onDelete={handleDeleteStep}
                       onDragStart={handleDragStart}
@@ -814,6 +826,7 @@ export function FlowchartEditor({
                     step={step}
                     selected={selectedIds.includes(step.id)}
                     status={executionStatus[step.id] ?? 'idle'}
+                    nodeManifest={step.nodeId ? manifestMap.get(step.nodeId) : undefined}
                     onSelect={(id) => handleSelect(id)}
                     onDelete={handleDeleteStep}
                     onDragStart={handleDragStart}
