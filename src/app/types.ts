@@ -93,6 +93,10 @@ export interface Block {
    * Applied only to blocks in the scenario's errorHandler track.
    */
   catchSlot?: number;
+  /** Flowchart editor: user-dragged position of the START pseudo-node. */
+  startPos?: { x: number; y: number };
+  /** Flowchart editor: user-dragged position of the END pseudo-node. */
+  endPos?: { x: number; y: number };
 }
 
 export interface Track {

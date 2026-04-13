@@ -20,6 +20,7 @@ import { AddStepModal } from './AddStepModal';
 import { StepNode, type StepNodeData } from './StepNode';
 import { ContainerNode, type ContainerNodeData } from './ContainerNode';
 import { StartNode, EndNode, type StartNodeData, type EndNodeData } from './StartEndNodes';
+import { ExecEdge } from './ExecEdge';
 interface Props {
   block: Block;
   trackName: string;
@@ -48,6 +49,10 @@ const nodeTypes = {
   container: ContainerNode,
   start: StartNode,
   end: EndNode,
+};
+
+const edgeTypes = {
+  exec: ExecEdge,
 };
 
 function reorderSteps(steps: Step[]): Step[] {
@@ -316,7 +321,7 @@ function FlowchartEditorInner({
       .sort((a, b) => a.order - b.order);
 
     const NODE_Y_TOP = 200;
-    const GRID_ORIGIN_X = 320;
+    const GRID_ORIGIN_X = 360;
     const GRID_COL_W = STEP_W + CHILD_GAP;
 
     // Resolve the effective position for a top-level step.
@@ -328,13 +333,13 @@ function FlowchartEditorInner({
       };
     };
 
-    // Start node — pinned at the far left.
+    // Start node — user-draggable; defaults to the far left.
+    const startPos = block.startPos ?? { x: 0, y: NODE_Y_TOP };
     nodes.push({
       id: START_ID,
       type: 'start',
-      position: { x: 0, y: NODE_Y_TOP },
-      draggable: false,
-      selectable: false,
+      position: startPos,
+      dragHandle: '.drag-handle',
       data: {
         inputs: block.inputs ?? {},
         scenarioVariables,
@@ -346,20 +351,20 @@ function FlowchartEditorInner({
     });
 
     // Top-level step nodes at their own positions.
-    let maxRightEdge = 260 + CHILD_GAP;
+    let maxRightEdge = startPos.x + 260 + CHILD_GAP;
     topLevel.forEach((step, idx) => {
       const pos = resolveTopLevelPos(step, idx);
       const size = renderStep(step, pos.x, pos.y, undefined);
       maxRightEdge = Math.max(maxRightEdge, pos.x + size.w + CHILD_GAP);
     });
 
-    // End node — pinned to the right of the rightmost step.
+    // End node — user-draggable; defaults to the right of the rightmost step.
+    const endPos = block.endPos ?? { x: maxRightEdge, y: NODE_Y_TOP };
     nodes.push({
       id: END_ID,
       type: 'end',
-      position: { x: maxRightEdge, y: NODE_Y_TOP },
-      draggable: false,
-      selectable: false,
+      position: endPos,
+      dragHandle: '.drag-handle',
       data: {
         outputs: block.outputs ?? {},
         scenarioVariables,
@@ -374,7 +379,8 @@ function FlowchartEditorInner({
     // The order is derived from `step.order`, which is kept in sync
     // with the x coordinate on drag end. Uses the dedicated exec
     // handles on top of each node so they do not collide with the
-    // data-port handles.
+    // data-port handles. Rendered with the custom ExecEdge component
+    // for the Bolt/Blueprint look (glow + arrow + flowing stripes).
     const execChain: string[] = [
       START_ID,
       ...topLevel.map((s) => s.id),
@@ -389,7 +395,7 @@ function FlowchartEditorInner({
         sourceHandle: '__exec__',
         target: bId,
         targetHandle: '__exec__',
-        style: { stroke: '#cbd5e1', strokeWidth: 3 },
+        type: 'exec',
       });
     }
 
@@ -437,6 +443,8 @@ function FlowchartEditorInner({
     block.steps,
     block.inputs,
     block.outputs,
+    block.startPos,
+    block.endPos,
     executionStatus,
     manifestMap,
     scenarioVariables,
@@ -465,57 +473,67 @@ function FlowchartEditorInner({
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<Node<AnyNodeData>>[]) => {
-      // Filter out position changes for start/end (they're locked).
-      const filtered = changes.filter((c) => {
-        if (c.type === 'position' && (c.id === START_ID || c.id === END_ID)) {
-          return false;
-        }
-        return true;
-      });
-      onNodesChange(filtered);
+      onNodesChange(changes);
 
-      // On drag end of a top-level step: persist the new free-form
-      // position AND recompute `order` from the x coordinate so that
-      // the exec chain (Start → ... → End) still reflects a sensible
-      // left-to-right reading of the graph.
-      const dragEnds = filtered.filter(
+      const dragEnds = changes.filter(
         (c) => c.type === 'position' && !c.dragging && c.position,
       );
       if (dragEnds.length === 0) return;
 
-      const posUpdates = new Map<string, { x: number; y: number }>();
+      // Collect Start/End drags separately — they persist to block.startPos/endPos.
+      let newStartPos: { x: number; y: number } | undefined;
+      let newEndPos: { x: number; y: number } | undefined;
+      const stepPosUpdates = new Map<string, { x: number; y: number }>();
+
       for (const ch of dragEnds) {
         if (ch.type !== 'position' || !ch.position) continue;
+        if (ch.id === START_ID) {
+          newStartPos = ch.position;
+          continue;
+        }
+        if (ch.id === END_ID) {
+          newEndPos = ch.position;
+          continue;
+        }
         const step = block.steps.find((s) => s.id === ch.id);
-        if (!step || step.parentStepId) continue; // top-level only
-        posUpdates.set(step.id, ch.position);
+        if (!step || step.parentStepId) continue; // top-level steps only
+        stepPosUpdates.set(step.id, ch.position);
       }
-      if (posUpdates.size === 0) return;
 
-      // Recompute order: all top-level steps sorted by their effective
-      // x coordinate (dragged ones use the new x, others keep their
-      // stored/displayed position).
-      const topLevelSteps = block.steps.filter((s) => !s.parentStepId);
-      const withX = topLevelSteps.map((s) => {
-        const dragged = posUpdates.get(s.id);
-        if (dragged) return { step: s, x: dragged.x };
-        if (s.position) return { step: s, x: s.position.x };
-        const node = rfNodes.find((n) => n.id === s.id);
-        return { step: s, x: node?.position.x ?? s.order * 1000 };
-      });
-      withX.sort((a, b) => a.x - b.x);
-      const orderMap = new Map<string, number>();
-      withX.forEach(({ step }, i) => orderMap.set(step.id, i));
+      const touchedSteps = stepPosUpdates.size > 0;
+      const touchedAnchors = !!(newStartPos || newEndPos);
+      if (!touchedSteps && !touchedAnchors) return;
 
-      onUpdateBlock({
-        steps: block.steps.map((s) => {
+      // Recompute order from x coordinates of all top-level steps so
+      // the auto-derived exec chain still reads left-to-right.
+      let nextSteps = block.steps;
+      if (touchedSteps) {
+        const topLevelSteps = block.steps.filter((s) => !s.parentStepId);
+        const withX = topLevelSteps.map((s) => {
+          const dragged = stepPosUpdates.get(s.id);
+          if (dragged) return { step: s, x: dragged.x };
+          if (s.position) return { step: s, x: s.position.x };
+          const node = rfNodes.find((n) => n.id === s.id);
+          return { step: s, x: node?.position.x ?? s.order * 1000 };
+        });
+        withX.sort((a, b) => a.x - b.x);
+        const orderMap = new Map<string, number>();
+        withX.forEach(({ step }, i) => orderMap.set(step.id, i));
+
+        nextSteps = block.steps.map((s) => {
           if (s.parentStepId) return s;
           const next: Step = { ...s };
           if (orderMap.has(s.id)) next.order = orderMap.get(s.id)!;
-          if (posUpdates.has(s.id)) next.position = posUpdates.get(s.id);
+          if (stepPosUpdates.has(s.id)) next.position = stepPosUpdates.get(s.id);
           return next;
-        }),
-      });
+        });
+      }
+
+      const patch: Partial<Block> = {};
+      if (touchedSteps) patch.steps = nextSteps;
+      if (newStartPos) patch.startPos = newStartPos;
+      if (newEndPos) patch.endPos = newEndPos;
+      onUpdateBlock(patch);
     },
     [onNodesChange, block.steps, rfNodes, onUpdateBlock],
   );
@@ -614,6 +632,7 @@ function FlowchartEditorInner({
           onEdgesChange={onEdgesChange}
           onConnect={handleConnect}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}
