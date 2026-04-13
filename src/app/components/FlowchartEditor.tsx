@@ -21,6 +21,7 @@ import { StepNode, type StepNodeData } from './StepNode';
 import { ContainerNode, type ContainerNodeData } from './ContainerNode';
 import { StartNode, type StartNodeData } from './StartEndNodes';
 import { ExecEdge } from './ExecEdge';
+import { VariablePalette, type VariableEntry } from './VariablePalette';
 interface Props {
   block: Block;
   trackName: string;
@@ -714,6 +715,65 @@ function FlowchartEditorInner({
     [block.steps, getEffectiveExecEdges, onUpdateBlock],
   );
 
+  // ── Variable palette ───
+  // Collect every var key referenced by this block (block IO +
+  // step bindings) and present them as draggable chips. Global
+  // scenario variables are appended in their own section so the
+  // user can reach them too.
+  const blockVariables = useMemo<VariableEntry[]>(() => {
+    const seen = new Map<string, VariableEntry>();
+    // Block inputs — the local input names (binding target keys).
+    for (const [name, binding] of Object.entries(block.inputs ?? {})) {
+      const key =
+        binding.kind === 'var'
+          ? binding.key
+          : `local.${name}`;
+      if (!seen.has(key)) seen.set(key, { key, origin: 'input' });
+    }
+    // Block outputs — every entry's destination key.
+    for (const [name, key] of Object.entries(block.outputs ?? {})) {
+      const k = key || `local.${name}`;
+      if (!seen.has(k)) seen.set(k, { key: k, origin: 'output' });
+    }
+    // Step bindings — every var-typed binding inside this block.
+    for (const s of block.steps) {
+      if (!s.bindings) continue;
+      for (const binding of Object.values(s.bindings)) {
+        if (binding.kind !== 'var' || !binding.key) continue;
+        if (!seen.has(binding.key)) {
+          seen.set(binding.key, { key: binding.key, origin: 'binding' });
+        }
+      }
+    }
+    // Global scenario variables — the rest. Skipped if already
+    // listed under a more specific origin.
+    for (const k of Object.keys(scenarioVariables)) {
+      const fullKey = `scenario.${k}`;
+      if (!seen.has(fullKey)) {
+        seen.set(fullKey, { key: fullKey, origin: 'global' });
+      }
+    }
+    return [...seen.values()];
+  }, [block.inputs, block.outputs, block.steps, scenarioVariables]);
+
+  const handleBindVarToPort = useCallback(
+    (nodeId: string, portName: string, varKey: string) => {
+      onUpdateBlock({
+        steps: block.steps.map((s) => {
+          if (s.id !== nodeId) return s;
+          return {
+            ...s,
+            bindings: {
+              ...s.bindings,
+              [portName]: { kind: 'var' as const, key: varKey },
+            },
+          };
+        }),
+      });
+    },
+    [block.steps, onUpdateBlock],
+  );
+
   const handleAddStep = (step: Step) => {
     if (addStepParent) {
       // Insert as a child of the container step at the end of its current children.
@@ -869,6 +929,12 @@ function FlowchartEditorInner({
           <span className="text-base leading-none">+</span>
           ステップ追加
         </button>
+
+        {/* Variable palette — drag chips onto data port handles. */}
+        <VariablePalette
+          variables={blockVariables}
+          onBindToPort={handleBindVarToPort}
+        />
       </div>
 
       <AddStepModal
