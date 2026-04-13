@@ -18,6 +18,7 @@ import type { NodeManifestEntry } from '../../globals';
 import { Breadcrumb } from './Breadcrumb';
 import { AddStepModal } from './AddStepModal';
 import { StepNode, type StepNodeData } from './StepNode';
+import { ContainerNode, type ContainerNodeData } from './ContainerNode';
 import { StartNode, EndNode, type StartNodeData, type EndNodeData } from './StartEndNodes';
 import { AddEdge, type AddEdgeData } from './AddEdge';
 interface Props {
@@ -38,15 +39,14 @@ interface Props {
   onRunBlock?: () => void;
 }
 
-const X_SPACING = 380;
-const NODE_Y = 100;
 const START_ID = '__start__';
 const END_ID = '__end__';
 
-type AnyNodeData = StepNodeData | StartNodeData | EndNodeData;
+type AnyNodeData = StepNodeData | StartNodeData | EndNodeData | ContainerNodeData;
 
 const nodeTypes = {
   step: StepNode,
+  container: ContainerNode,
   start: StartNode,
   end: EndNode,
 };
@@ -81,6 +81,7 @@ function FlowchartEditorInner({
   onRunStep,
 }: Props) {
   const [addStepOpen, setAddStepOpen] = useState(false);
+  const [addStepParent, setAddStepParent] = useState<string | undefined>(undefined);
   const [insertIndex, setInsertIndex] = useState<number>(0);
 
   const manifestMap = useMemo(() => {
@@ -186,19 +187,145 @@ function FlowchartEditorInner({
   }, []);
 
   // Build ReactFlow nodes: [Start, ...steps, End]
+  // Build ReactFlow nodes: [Start, ...steps, End] with nested containers.
   const { rfNodes, rfEdges } = useMemo(() => {
+    const nodes: Node<AnyNodeData>[] = [];
+    const edges: Edge[] = [];
+
+    // Layout constants for nesting
+    const STEP_W = 320;
+    const STEP_H = 140;
+    const CHILD_GAP = 20;
+    const CONTAINER_PAD_X = 24;
+    const CONTAINER_PAD_TOP = 44; // header height
+    const CONTAINER_PAD_BOTTOM = 24;
+
+    // Look up a step's children, sorted by order.
+    const childrenOf = (parentId: string): Step[] =>
+      block.steps
+        .filter((s) => s.parentStepId === parentId)
+        .sort((a, b) => a.order - b.order);
+
+    // Recursively measure a step's display size.
+    // Containers grow to fit their (possibly nested) children.
+    const measure = (step: Step): { w: number; h: number } => {
+      const isContainer =
+        step.type === 'loop' ||
+        step.type === 'branch' ||
+        step.type === 'switch' ||
+        step.type === 'group';
+      if (!isContainer) return { w: STEP_W, h: STEP_H };
+      const kids = childrenOf(step.id);
+      if (kids.length === 0) return { w: STEP_W + 40, h: STEP_H + 60 };
+      const sizes = kids.map(measure);
+      const w =
+        sizes.reduce((sum, s) => sum + s.w, 0) +
+        (kids.length - 1) * CHILD_GAP +
+        CONTAINER_PAD_X * 2;
+      const h =
+        Math.max(...sizes.map((s) => s.h)) +
+        CONTAINER_PAD_TOP +
+        CONTAINER_PAD_BOTTOM;
+      return { w, h };
+    };
+
+    // Recursively render a step (and its children, if container).
+    // Returns the size used.
+    const renderStep = (
+      step: Step,
+      x: number,
+      y: number,
+      parentId: string | undefined,
+    ): { w: number; h: number } => {
+      const isContainer =
+        step.type === 'loop' ||
+        step.type === 'branch' ||
+        step.type === 'switch' ||
+        step.type === 'group';
+      const size = measure(step);
+
+      if (isContainer) {
+        const kids = childrenOf(step.id);
+        nodes.push({
+          id: step.id,
+          type: 'container',
+          position: { x, y },
+          parentId,
+          extent: parentId ? 'parent' : undefined,
+          dragHandle: '.drag-handle',
+          data: {
+            step,
+            status: executionStatus[step.id] ?? 'idle',
+            width: size.w,
+            height: size.h,
+            childCount: kids.length,
+            onDelete: handleDeleteStep,
+            onAddChild: (parent: string) => {
+              setAddStepParent(parent);
+              setAddStepOpen(true);
+            },
+          } as ContainerNodeData,
+        });
+        // Render children inside.
+        let childX = CONTAINER_PAD_X;
+        const childY = CONTAINER_PAD_TOP;
+        for (const child of kids) {
+          const childSize = renderStep(child, childX, childY, step.id);
+          // Edge between adjacent children
+          const idx = kids.indexOf(child);
+          if (idx > 0) {
+            const prev = kids[idx - 1];
+            edges.push({
+              id: `e-${prev.id}-${child.id}`,
+              source: prev.id,
+              target: child.id,
+              type: 'add',
+              data: {
+                onAdd: () => {
+                  setAddStepParent(step.id);
+                  setAddStepOpen(true);
+                },
+              } as AddEdgeData,
+            });
+          }
+          childX += childSize.w + CHILD_GAP;
+        }
+      } else {
+        // Leaf step (action / wait / subroutine)
+        nodes.push({
+          id: step.id,
+          type: 'step',
+          position: { x, y },
+          parentId,
+          extent: parentId ? 'parent' : undefined,
+          dragHandle: '.drag-handle',
+          data: {
+            step,
+            status: executionStatus[step.id] ?? 'idle',
+            nodeManifest: step.nodeId ? manifestMap.get(step.nodeId) : undefined,
+            scenarioVariables,
+            onDelete: handleDeleteStep,
+            onUpdate: handleUpdateStep,
+            onRunStep: onRunStep && !running ? onRunStep : undefined,
+          } as StepNodeData,
+        });
+      }
+      return size;
+    };
+
+    // Top-level layout: Start | step* | End in a horizontal row.
     const topLevel = block.steps
       .filter((s) => !s.parentStepId)
       .sort((a, b) => a.order - b.order);
 
-    const nodes: Node<AnyNodeData>[] = [];
-    const edges: Edge[] = [];
+    const NODE_Y_TOP = 100;
+    let cursorX = 0;
 
-    // Start node (locked position, not draggable)
+    // Start node
     nodes.push({
       id: START_ID,
       type: 'start',
-      position: { x: 0, y: NODE_Y },
+      position: { x: cursorX, y: NODE_Y_TOP },
       draggable: false,
       selectable: false,
       data: {
@@ -210,31 +337,19 @@ function FlowchartEditorInner({
         onDeleteInput: handleDeleteInput,
       } as StartNodeData,
     });
+    cursorX += 280 + CHILD_GAP;
 
-    // Step nodes
-    topLevel.forEach((step, i) => {
-      nodes.push({
-        id: step.id,
-        type: 'step',
-        position: { x: (i + 1) * X_SPACING, y: NODE_Y },
-        dragHandle: '.drag-handle',
-        data: {
-          step,
-          status: executionStatus[step.id] ?? 'idle',
-          nodeManifest: step.nodeId ? manifestMap.get(step.nodeId) : undefined,
-          scenarioVariables,
-          onDelete: handleDeleteStep,
-          onUpdate: handleUpdateStep,
-          onRunStep: onRunStep && !running ? onRunStep : undefined,
-        } as StepNodeData,
-      });
+    // Step nodes (top-level)
+    topLevel.forEach((step) => {
+      const size = renderStep(step, cursorX, NODE_Y_TOP, undefined);
+      cursorX += size.w + CHILD_GAP;
     });
 
     // End node
     nodes.push({
       id: END_ID,
       type: 'end',
-      position: { x: (topLevel.length + 1) * X_SPACING, y: NODE_Y },
+      position: { x: cursorX, y: NODE_Y_TOP },
       draggable: false,
       selectable: false,
       data: {
@@ -247,8 +362,7 @@ function FlowchartEditorInner({
       } as EndNodeData,
     });
 
-    // Edges with inline + buttons
-    // Build a list of [source, target] pairs: Start → step0 → step1 → ... → End
+    // Top-level chain edges: Start → step0 → ... → End
     const chain: string[] = [START_ID, ...topLevel.map((s) => s.id), END_ID];
     for (let i = 0; i < chain.length - 1; i++) {
       edges.push({
@@ -261,12 +375,10 @@ function FlowchartEditorInner({
     }
 
     // Data-flow edges: derived from shared scenario variable keys.
-    // For each step's bindings, find any other step that wrote the same key
-    // and draw a port-to-port edge.
+    // Walks ALL steps (including nested) so cross-container connections show.
     const writers = new Map<string, { stepId: string; portName: string }>();
-    for (const step of topLevel) {
+    for (const step of block.steps) {
       if (!step.bindings) continue;
-      // Find this step's manifest to know which ports are out-ports.
       const manifest = step.nodeId ? manifestMap.get(step.nodeId) : undefined;
       if (!manifest) continue;
       for (const [portName, binding] of Object.entries(step.bindings)) {
@@ -276,7 +388,7 @@ function FlowchartEditorInner({
         writers.set(binding.key, { stepId: step.id, portName });
       }
     }
-    for (const step of topLevel) {
+    for (const step of block.steps) {
       if (!step.bindings) continue;
       const manifest = step.nodeId ? manifestMap.get(step.nodeId) : undefined;
       if (!manifest) continue;
@@ -349,8 +461,10 @@ function FlowchartEditorInner({
         (c) => c.type === 'position' && !c.dragging,
       );
       if (dragEnd) {
+        // Only reorder TOP-LEVEL nodes (no parentId). Container children
+        // are positioned by the layout algorithm and shouldn't drag-reorder.
         const stepNodes = nodes.filter(
-          (n) => n.id !== START_ID && n.id !== END_ID,
+          (n) => n.id !== START_ID && n.id !== END_ID && !n.parentId,
         );
         const updated = stepNodes.map((n) => {
           const ch = filtered.find(
@@ -366,7 +480,9 @@ function FlowchartEditorInner({
         updated.forEach((n, i) => orderMap.set(n.id, i));
         onUpdateBlock({
           steps: block.steps.map((s) =>
-            orderMap.has(s.id) ? { ...s, order: orderMap.get(s.id)! } : s,
+            !s.parentStepId && orderMap.has(s.id)
+              ? { ...s, order: orderMap.get(s.id)! }
+              : s,
           ),
         });
       }
@@ -418,7 +534,21 @@ function FlowchartEditorInner({
   );
 
   const handleAddStep = (step: Step) => {
-    // Insert at insertIndex (0 = before first step, N = after last step).
+    if (addStepParent) {
+      // Insert as a child of the container step at the end of its current children.
+      const siblings = block.steps
+        .filter((s) => s.parentStepId === addStepParent)
+        .sort((a, b) => a.order - b.order);
+      const nextChildOrder = siblings.length;
+      const newStep = {
+        ...step,
+        parentStepId: addStepParent,
+        order: nextChildOrder,
+      };
+      onUpdateBlock({ steps: [...block.steps, newStep] });
+      return;
+    }
+    // Top-level: insert at insertIndex.
     const topLevel = block.steps
       .filter((s) => !s.parentStepId)
       .sort((a, b) => a.order - b.order);
@@ -495,9 +625,13 @@ function FlowchartEditorInner({
 
       <AddStepModal
         open={addStepOpen}
-        onOpenChange={setAddStepOpen}
+        onOpenChange={(o) => {
+          setAddStepOpen(o);
+          if (!o) setAddStepParent(undefined);
+        }}
         blockLabel={block.label}
         nextOrder={insertIndex}
+        parentStepId={addStepParent}
         subroutines={subroutines}
         nodeManifest={nodeManifest}
         onAdd={handleAddStep}
