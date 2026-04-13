@@ -502,23 +502,20 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-fl-bg font-mono text-fl-text">
-      <Titlebar
-        onImport={handleImport}
-        onExport={handleExport}
-        onSample={() => setSamplesOpen(true)}
-        tabs={
-          <ScenarioTabs
-            tabs={tabsStore.tabs}
-            activeId={tabsStore.activeId}
-            onSwitch={handleSwitchTab}
-            onClose={handleCloseTab}
-            onNewTab={handleNewTab}
-          />
-        }
+      <Titlebar />
+      <ScenarioTabs
+        tabs={tabsStore.tabs}
+        activeId={tabsStore.activeId}
+        onSwitch={handleSwitchTab}
+        onClose={handleCloseTab}
+        onNewTab={handleNewTab}
       />
       <Toolbar
         playing={playing}
         onTogglePlay={togglePlay}
+        onImport={handleImport}
+        onExport={handleExport}
+        onSample={() => setSamplesOpen(true)}
         onOpenNodeEditor={() => setNodeEditorOpen(true)}
         nodeCount={nodeManifest.length}
         theme={theme}

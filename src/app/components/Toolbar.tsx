@@ -5,6 +5,9 @@ import {
   Sun,
   Moon,
   Terminal,
+  FolderOpen,
+  Save,
+  BookOpen,
 } from 'lucide-react';
 import type { Theme } from '../useTheme';
 
@@ -13,6 +16,9 @@ export type EditMode = 'block' | 'sync';
 interface Props {
   playing: boolean;
   onTogglePlay: () => void;
+  onImport: () => void;
+  onExport: () => void;
+  onSample: () => void;
   onOpenNodeEditor: () => void;
   nodeCount: number;
   theme: Theme;
@@ -22,12 +28,14 @@ interface Props {
 }
 
 /**
- * Slim action bar below the titlebar.
- * Contains: run/stop, node editor, python status, theme toggle.
+ * Main action toolbar: file ops, run, node editor, python status, theme.
  */
 export function Toolbar({
   playing,
   onTogglePlay,
+  onImport,
+  onExport,
+  onSample,
   onOpenNodeEditor,
   nodeCount,
   theme,
@@ -35,45 +43,60 @@ export function Toolbar({
   pythonState,
   onOpenPythonInstall,
 }: Props) {
-  const chipBase =
-    'flex items-center gap-1 rounded-md border border-fl-border-strong bg-fl-panel-2 px-2.5 py-1 font-mono text-[9px] font-bold text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text';
+  const iconBtn =
+    'flex h-7 items-center gap-1.5 rounded-md px-2.5 font-mono text-[10px] text-fl-text-faint transition-colors hover:bg-fl-panel-2 hover:text-fl-text';
+
+  const sep = <div className="mx-1 h-4 w-px bg-fl-border" />;
 
   return (
-    <div className="flex flex-shrink-0 items-center gap-2 border-b border-fl-border bg-fl-panel px-4 py-1.5">
-      {/* Run / stop */}
+    <div className="flex flex-shrink-0 items-center gap-1 border-b border-fl-border bg-fl-panel px-3 py-1.5">
+      {/* File ops */}
+      <button type="button" onClick={onImport} className={iconBtn} title="開く (Ctrl+O)">
+        <FolderOpen className="h-3 w-3" /> 開く
+      </button>
+      <button type="button" onClick={onExport} className={iconBtn} title="保存 (Ctrl+S)">
+        <Save className="h-3 w-3" /> 保存
+      </button>
+      <button type="button" onClick={onSample} className={iconBtn} title="サンプルを読込">
+        <BookOpen className="h-3 w-3" /> サンプル
+      </button>
+
+      {sep}
+
+      {/* Run / stop — prominent */}
       <button
         type="button"
         onClick={onTogglePlay}
-        className="flex items-center gap-1 rounded-md border px-3 py-1 font-mono text-[9px] font-bold transition-colors"
+        className="flex h-7 items-center gap-1.5 rounded-md border px-3 font-mono text-[10px] font-bold transition-all"
         style={{
           borderColor: playing ? '#ef4444' : '#22c55e',
-          background: playing ? '#ef444418' : '#22c55e18',
+          background: playing ? '#ef444422' : '#22c55e22',
           color: playing ? '#ef4444' : '#22c55e',
         }}
       >
         {playing ? (
           <>
-            <Square className="h-2.5 w-2.5" /> 停止
+            <Square className="h-3 w-3 fill-current" /> 停止
           </>
         ) : (
           <>
-            <Play className="h-2.5 w-2.5" /> 実行
+            <Play className="h-3 w-3 fill-current" /> 実行
           </>
         )}
       </button>
 
-      <div className="mx-1 h-4 w-px bg-fl-border" />
+      {sep}
 
       {/* Node editor */}
       <button
         type="button"
         onClick={onOpenNodeEditor}
-        className={chipBase}
+        className={iconBtn}
         title="Python ノードを編集 / 新規作成"
       >
-        <Code2 className="h-2.5 w-2.5" /> ノード
+        <Code2 className="h-3 w-3" /> ノード
         {nodeCount > 0 && (
-          <span className="ml-0.5 rounded bg-fl-border-strong px-1 text-[8px] text-fl-text-dim">
+          <span className="rounded bg-fl-border-strong px-1 font-mono text-[8px] text-fl-text-dim">
             {nodeCount}
           </span>
         )}
@@ -83,26 +106,14 @@ export function Toolbar({
       <button
         type="button"
         onClick={onOpenPythonInstall}
-        className="flex items-center gap-1 rounded-md border px-2.5 py-1 font-mono text-[9px] font-bold transition-colors"
+        className="flex h-7 items-center gap-1 rounded-md px-2 font-mono text-[10px] font-bold transition-colors"
         style={{
-          borderColor:
-            pythonState === 'ready'
-              ? '#22c55e55'
-              : pythonState === 'missing'
-                ? '#f59e0b'
-                : 'var(--fl-border-strong)',
-          background:
-            pythonState === 'ready'
-              ? '#22c55e10'
-              : pythonState === 'missing'
-                ? '#f59e0b14'
-                : 'var(--fl-panel-2)',
           color:
             pythonState === 'ready'
               ? '#22c55e'
               : pythonState === 'missing'
                 ? '#f59e0b'
-                : 'var(--fl-text-dim)',
+                : 'var(--fl-text-ghost)',
         }}
         title={
           pythonState === 'ready'
@@ -112,29 +123,27 @@ export function Toolbar({
               : 'Python: 確認中…'
         }
       >
-        <Terminal className="h-2.5 w-2.5" />
-        {pythonState === 'ready'
-          ? '●'
-          : pythonState === 'missing'
-            ? '⚠'
-            : '…'}
+        <Terminal className="h-3 w-3" />
+        <span>
+          {pythonState === 'ready' ? '●' : pythonState === 'missing' ? '⚠' : '…'}
+        </span>
       </button>
 
-      {/* Right-aligned items */}
-      <div className="ml-auto flex items-center gap-1.5">
+      {/* Right-aligned */}
+      <div className="ml-auto flex items-center gap-2">
         <span className="font-mono text-[8px] text-fl-text-ghost">
           Ctrl+Z=元に戻す / Del=削除
         </span>
         <button
           type="button"
           onClick={onToggleTheme}
-          className="flex h-6 w-6 items-center justify-center rounded-md border border-fl-border-strong bg-fl-panel-2 text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-fl-text-faint transition-colors hover:bg-fl-panel-2 hover:text-fl-text"
           title={theme === 'dark' ? 'ライトテーマ' : 'ダークテーマ'}
         >
           {theme === 'dark' ? (
-            <Sun className="h-2.5 w-2.5" />
+            <Sun className="h-3 w-3" />
           ) : (
-            <Moon className="h-2.5 w-2.5" />
+            <Moon className="h-3 w-3" />
           )}
         </button>
       </div>
