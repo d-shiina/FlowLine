@@ -20,8 +20,6 @@ import { AddStepModal } from './AddStepModal';
 import { StepNode, type StepNodeData } from './StepNode';
 import { StartNode, EndNode, type StartNodeData, type EndNodeData } from './StartEndNodes';
 import { AddEdge, type AddEdgeData } from './AddEdge';
-import { uid } from '../useScenario';
-
 interface Props {
   block: Block;
   trackName: string;
@@ -262,6 +260,47 @@ function FlowchartEditorInner({
       });
     }
 
+    // Data-flow edges: derived from shared scenario variable keys.
+    // For each step's bindings, find any other step that wrote the same key
+    // and draw a port-to-port edge.
+    const writers = new Map<string, { stepId: string; portName: string }>();
+    for (const step of topLevel) {
+      if (!step.bindings) continue;
+      // Find this step's manifest to know which ports are out-ports.
+      const manifest = step.nodeId ? manifestMap.get(step.nodeId) : undefined;
+      if (!manifest) continue;
+      for (const [portName, binding] of Object.entries(step.bindings)) {
+        if (binding.kind !== 'var') continue;
+        const def = manifest.ports[portName];
+        if (def?.kind !== 'out') continue;
+        writers.set(binding.key, { stepId: step.id, portName });
+      }
+    }
+    for (const step of topLevel) {
+      if (!step.bindings) continue;
+      const manifest = step.nodeId ? manifestMap.get(step.nodeId) : undefined;
+      if (!manifest) continue;
+      for (const [portName, binding] of Object.entries(step.bindings)) {
+        if (binding.kind !== 'var') continue;
+        const def = manifest.ports[portName];
+        if (def?.kind !== 'in') continue;
+        const writer = writers.get(binding.key);
+        if (!writer || writer.stepId === step.id) continue;
+        edges.push({
+          id: `df-${writer.stepId}-${writer.portName}-${step.id}-${portName}`,
+          source: writer.stepId,
+          sourceHandle: writer.portName,
+          target: step.id,
+          targetHandle: portName,
+          animated: true,
+          style: { stroke: '#6366f1', strokeWidth: 2 },
+          label: binding.key,
+          labelStyle: { fontSize: 8, fill: 'var(--fl-text-faint)' },
+          labelBgStyle: { fill: 'var(--fl-panel-2)' },
+        });
+      }
+    }
+
     return { rfNodes: nodes, rfEdges: edges };
   }, [
     block.steps,
@@ -335,6 +374,49 @@ function FlowchartEditorInner({
     [onNodesChange, nodes, block.steps, onUpdateBlock],
   );
 
+  // ── Port-to-port connection (data flow) ───
+  // When user drags from out-port handle to in-port handle, set both
+  // step bindings to share a generated scenario variable key.
+  const handleConnect = useCallback(
+    (params: { source: string | null; sourceHandle: string | null; target: string | null; targetHandle: string | null }) => {
+      const { source, sourceHandle, target, targetHandle } = params;
+      if (!source || !sourceHandle || !target || !targetHandle) return;
+      if (source === START_ID || target === END_ID) return; // start/end are handled separately
+      if (source === target) return;
+      const sourceStep = block.steps.find((s) => s.id === source);
+      const targetStep = block.steps.find((s) => s.id === target);
+      if (!sourceStep || !targetStep) return;
+
+      // Generate a unique link key (short and readable).
+      const linkKey = `scenario._link_${Math.random().toString(36).slice(2, 8)}`;
+
+      onUpdateBlock({
+        steps: block.steps.map((s) => {
+          if (s.id === source) {
+            return {
+              ...s,
+              bindings: {
+                ...s.bindings,
+                [sourceHandle]: { kind: 'var' as const, key: linkKey },
+              },
+            };
+          }
+          if (s.id === target) {
+            return {
+              ...s,
+              bindings: {
+                ...s.bindings,
+                [targetHandle]: { kind: 'var' as const, key: linkKey },
+              },
+            };
+          }
+          return s;
+        }),
+      });
+    },
+    [block.steps, onUpdateBlock],
+  );
+
   const handleAddStep = (step: Step) => {
     // Insert at insertIndex (0 = before first step, N = after last step).
     const topLevel = block.steps
@@ -368,6 +450,7 @@ function FlowchartEditorInner({
           edges={edges}
           onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={handleConnect}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
