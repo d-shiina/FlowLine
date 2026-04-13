@@ -192,13 +192,15 @@ function FlowchartEditorInner({
     const nodes: Node<AnyNodeData>[] = [];
     const edges: Edge[] = [];
 
-    // Layout constants for nesting
+    // Layout constants for nesting.
+    // Generous spacing so exec wires + data wires have room to breathe
+    // (Bolt / Blueprint style).
     const STEP_W = 320;
     const STEP_H = 140;
-    const CHILD_GAP = 20;
-    const CONTAINER_PAD_X = 24;
-    const CONTAINER_PAD_TOP = 44; // header height
-    const CONTAINER_PAD_BOTTOM = 24;
+    const CHILD_GAP = 90;
+    const CONTAINER_PAD_X = 40;
+    const CONTAINER_PAD_TOP = 56; // header height
+    const CONTAINER_PAD_BOTTOM = 32;
 
     // Look up a step's children, sorted by order.
     const childrenOf = (parentId: string): Step[] =>
@@ -273,15 +275,18 @@ function FlowchartEditorInner({
         const childY = CONTAINER_PAD_TOP;
         for (const child of kids) {
           const childSize = renderStep(child, childX, childY, step.id);
-          // Edge between adjacent children
+          // Exec edge between adjacent children
           const idx = kids.indexOf(child);
           if (idx > 0) {
             const prev = kids[idx - 1];
             edges.push({
-              id: `e-${prev.id}-${child.id}`,
+              id: `exec-${prev.id}-${child.id}`,
               source: prev.id,
+              sourceHandle: '__exec__',
               target: child.id,
+              targetHandle: '__exec__',
               type: 'add',
+              style: { stroke: '#cbd5e1', strokeWidth: 3 },
               data: {
                 onAdd: () => {
                   setAddStepParent(step.id);
@@ -339,7 +344,7 @@ function FlowchartEditorInner({
         onDeleteInput: handleDeleteInput,
       } as StartNodeData,
     });
-    cursorX += 280 + CHILD_GAP;
+    cursorX += 260 + CHILD_GAP;
 
     // Step nodes (top-level)
     topLevel.forEach((step) => {
@@ -364,10 +369,34 @@ function FlowchartEditorInner({
       } as EndNodeData,
     });
 
-    // Note: chain edges (Start → step0 → step1 → ... → End) were
-    // removed because they collided with port-to-port wiring on the
-    // node handles. Adding new steps now uses the floating "+" button
-    // and right-click menu instead.
+    // Exec (control flow) edges: Start → step0 → ... → End.
+    // Use the dedicated "__exec__" handles which live at the top of
+    // each node, so they do NOT collide with the data-port handles
+    // inside the node body. Auto-derived from `order`; reorder by
+    // dragging a node horizontally.
+    const execChain: Array<{ id: string; sourceHandle: string; targetHandle: string }> = [
+      { id: START_ID, sourceHandle: '__exec__', targetHandle: '__exec__' },
+      ...topLevel.map((s) => ({
+        id: s.id,
+        sourceHandle: '__exec__',
+        targetHandle: '__exec__',
+      })),
+      { id: END_ID, sourceHandle: '__exec__', targetHandle: '__exec__' },
+    ];
+    for (let i = 0; i < execChain.length - 1; i++) {
+      const a = execChain[i];
+      const b = execChain[i + 1];
+      edges.push({
+        id: `exec-${a.id}-${b.id}`,
+        source: a.id,
+        sourceHandle: a.sourceHandle,
+        target: b.id,
+        targetHandle: b.targetHandle,
+        type: 'add',
+        style: { stroke: '#cbd5e1', strokeWidth: 3 },
+        data: { onAdd: () => handleOpenAdd(i) } as AddEdgeData,
+      });
+    }
 
     // Data-flow edges: derived from shared scenario variable keys.
     // Walks ALL steps (including nested) so cross-container connections show.
@@ -426,6 +455,7 @@ function FlowchartEditorInner({
     handleUpdateOutput,
     handleRenameOutput,
     handleDeleteOutput,
+    handleOpenAdd,
     onRunStep,
     running,
   ]);
@@ -501,6 +531,8 @@ function FlowchartEditorInner({
       if (!source || !sourceHandle || !target || !targetHandle) return;
       if (source === START_ID || target === END_ID) return; // start/end are handled separately
       if (source === target) return;
+      // Exec handles are auto-derived from `order` — ignore manual wiring.
+      if (sourceHandle === '__exec__' || targetHandle === '__exec__') return;
       const sourceStep = block.steps.find((s) => s.id === source);
       const targetStep = block.steps.find((s) => s.id === target);
       if (!sourceStep || !targetStep) return;

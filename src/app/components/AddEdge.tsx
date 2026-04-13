@@ -27,6 +27,7 @@ export const AddEdge = memo(function AddEdge({
   sourcePosition,
   targetPosition,
   data,
+  style,
 }: EdgeProps) {
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -38,14 +39,12 @@ export const AddEdge = memo(function AddEdge({
   });
 
   const d = data as unknown as AddEdgeData;
+  const edgeStyle = style ?? { stroke: '#cbd5e1', strokeWidth: 3 };
+  const accent = (edgeStyle.stroke as string | undefined) ?? '#cbd5e1';
 
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        style={{ stroke: '#3b82f6', strokeWidth: 2 }}
-      />
+      <BaseEdge id={id} path={edgePath} style={edgeStyle} />
       <EdgeLabelRenderer>
         <div
           style={{
@@ -61,7 +60,8 @@ export const AddEdge = memo(function AddEdge({
               e.stopPropagation();
               d.onAdd();
             }}
-            className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[#3b82f6] bg-fl-panel-2 text-[#3b82f6] shadow-md transition-all hover:scale-110 hover:bg-[#3b82f6] hover:text-white"
+            className="flex h-5 w-5 items-center justify-center rounded-full border-2 bg-fl-panel-2 shadow-md transition-all hover:scale-110"
+            style={{ borderColor: accent, color: accent }}
             title="ここにステップを追加"
           >
             <Plus className="h-3 w-3" />

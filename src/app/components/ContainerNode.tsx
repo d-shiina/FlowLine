@@ -65,17 +65,22 @@ export const ContainerNode = memo(function ContainerNode({
               : 'none',
       }}
     >
-      {/* Target handle — accept incoming control flow */}
+      {/* Exec in — accept incoming control flow */}
       <Handle
         type="target"
         position={Position.Left}
-        id="__container__"
+        id="__exec__"
         style={{
-          background: meta.color,
-          width: 9,
-          height: 9,
-          border: '2px solid var(--fl-bg)',
+          top: 16,
+          left: -8,
+          width: 14,
+          height: 14,
+          borderRadius: 3,
+          background: '#e2e8f0',
+          border: '2px solid #475569',
+          zIndex: 10,
         }}
+        title="exec in"
       />
 
       {/* Header (drag handle) */}
@@ -123,17 +128,22 @@ export const ContainerNode = memo(function ContainerNode({
         </div>
       )}
 
-      {/* Source handle — emit control flow out */}
+      {/* Exec out — emit control flow */}
       <Handle
         type="source"
         position={Position.Right}
-        id="__container__"
+        id="__exec__"
         style={{
-          background: meta.color,
-          width: 9,
-          height: 9,
-          border: '2px solid var(--fl-bg)',
+          top: 16,
+          right: -8,
+          width: 14,
+          height: 14,
+          borderRadius: 3,
+          background: '#e2e8f0',
+          border: '2px solid #475569',
+          zIndex: 10,
         }}
+        title="exec out"
       />
     </div>
   );

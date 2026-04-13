@@ -127,12 +127,18 @@ export const StartNode = memo(function StartNode({ data }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
+        id="__exec__"
         style={{
-          background: START_COLOR,
-          width: 10,
-          height: 10,
-          border: '2px solid var(--fl-panel-2)',
+          top: 18,
+          right: -8,
+          width: 14,
+          height: 14,
+          borderRadius: 3,
+          background: '#e2e8f0',
+          border: '2px solid #475569',
+          zIndex: 10,
         }}
+        title="exec out"
       />
     </div>
   );
@@ -224,12 +230,18 @@ export const EndNode = memo(function EndNode({ data }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
+        id="__exec__"
         style={{
-          background: END_COLOR,
-          width: 10,
-          height: 10,
-          border: '2px solid var(--fl-panel-2)',
+          top: 18,
+          left: -8,
+          width: 14,
+          height: 14,
+          borderRadius: 3,
+          background: '#e2e8f0',
+          border: '2px solid #475569',
+          zIndex: 10,
         }}
+        title="exec in"
       />
 
       {/* Header */}
