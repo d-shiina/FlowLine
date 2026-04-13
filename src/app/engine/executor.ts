@@ -124,7 +124,7 @@ export class Executor {
   }
 
   async run(): Promise<void> {
-    const { singleBlockId, startStepId, singleStepId } = this.options;
+    const { singleBlockId, singleStepId } = this.options;
     const isPartial = !!(singleBlockId || singleStepId);
 
     // Reset the channel store for this run.
@@ -301,8 +301,12 @@ export class Executor {
     }
     this.flush();
 
+    // Top-level steps (both in-flow on the exec rail and off-flow
+    // "pure" nodes). Topo sort places writers before readers so pure
+    // nodes that produce data are evaluated before any in-flow
+    // consumer reads from them.
     const topLevel = this.topoSortSteps(
-      block.steps.filter((s) => !s.parentStepId && s.inFlow !== false),
+      block.steps.filter((s) => !s.parentStepId),
     );
 
     // Find start index
@@ -509,9 +513,10 @@ export class Executor {
     }
     this.flush();
 
-    const topLevelRaw = block.steps.filter(
-      (s) => !s.parentStepId && s.inFlow !== false,
-    );
+    // Include both in-flow and off-flow steps. Topo sort orders by
+    // data dependencies so pure (off-flow) nodes run before any
+    // in-flow consumer that reads their outputs via shared var keys.
+    const topLevelRaw = block.steps.filter((s) => !s.parentStepId);
     const topLevel = this.topoSortSteps(topLevelRaw);
 
     let failed = false;

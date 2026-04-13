@@ -320,12 +320,17 @@ function FlowchartEditorInner({
       return size;
     };
 
-    // Top-level layout: Start | step* | End in a horizontal row.
+    // Top-level steps: split into "in flow" (on the exec rail) and
+    // "off flow" (free-area pure nodes that connect via data wires only).
     const topLevel = block.steps
       .filter((s) => !s.parentStepId)
       .sort((a, b) => a.order - b.order);
 
+    const inFlowSteps = topLevel.filter((s) => s.inFlow !== false);
+    const offFlowSteps = topLevel.filter((s) => s.inFlow === false);
+
     const NODE_Y_TOP = 100;
+    const FREE_AREA_Y = NODE_Y_TOP + 360; // below the main rail
     let cursorX = 0;
 
     // Start node
@@ -346,8 +351,8 @@ function FlowchartEditorInner({
     });
     cursorX += 260 + CHILD_GAP;
 
-    // Step nodes (top-level)
-    topLevel.forEach((step) => {
+    // In-flow step nodes (top-level, on the exec rail)
+    inFlowSteps.forEach((step) => {
       const size = renderStep(step, cursorX, NODE_Y_TOP, undefined);
       cursorX += size.w + CHILD_GAP;
     });
@@ -369,14 +374,24 @@ function FlowchartEditorInner({
       } as EndNodeData,
     });
 
-    // Exec (control flow) edges: Start → step0 → ... → End.
+    // Off-flow step nodes (free-area pure nodes). They render at their
+    // stored position; if no position is set yet (newly detached or
+    // freshly added), fall back to a tidy row below the rail.
+    let freeFallbackX = 0;
+    offFlowSteps.forEach((step) => {
+      const fallback = { x: freeFallbackX, y: FREE_AREA_Y };
+      const pos = step.position ?? fallback;
+      renderStep(step, pos.x, pos.y, undefined);
+      freeFallbackX += STEP_W + CHILD_GAP;
+    });
+
+    // Exec (control flow) edges: Start → in-flow step0 → ... → End.
     // Use the dedicated "__exec__" handles which live at the top of
     // each node, so they do NOT collide with the data-port handles
-    // inside the node body. Auto-derived from `order`; reorder by
-    // dragging a node horizontally.
+    // inside the node body. Off-flow pure nodes are excluded.
     const execChain: Array<{ id: string; sourceHandle: string; targetHandle: string }> = [
       { id: START_ID, sourceHandle: '__exec__', targetHandle: '__exec__' },
-      ...topLevel.map((s) => ({
+      ...inFlowSteps.map((s) => ({
         id: s.id,
         sourceHandle: '__exec__',
         targetHandle: '__exec__',
@@ -480,43 +495,97 @@ function FlowchartEditorInner({
       });
       onNodesChange(filtered);
 
-      // On drag end of a top-level step: re-derive `order` from the
-      // dragged node's x position, so dragging horizontally reorders
-      // the step within the flow. Nested children (with parentId) are
-      // ignored — they reorder via the container's child layout.
+      // On drag end of a top-level step:
+      //  - If dropped above the free-area threshold: it belongs to the
+      //    exec rail. Reorder by x. If it was previously off-flow,
+      //    re-attach (clear position, set inFlow).
+      //  - If dropped below the threshold: it becomes a free-area pure
+      //    node. Persist position, mark inFlow=false. Containers are
+      //    forbidden from detaching (they ARE control flow).
       const dragEnds = filtered.filter(
         (c) => c.type === 'position' && !c.dragging && c.position,
       );
       if (dragEnds.length === 0) return;
 
-      // Collect new x positions for top-level steps only.
-      const draggedTopLevelX = new Map<string, number>();
+      // Threshold for "below the rail = free area".
+      // Rail Y is 100, step heights ~140-180, so anything below ~300
+      // is comfortably in the free zone.
+      const FREE_THRESHOLD_Y = 300;
+      const isContainerType = (t: Step['type']) =>
+        t === 'loop' || t === 'branch' || t === 'switch' || t === 'group';
+
+      // step.id → new x position (for in-flow nodes)
+      const newRailX = new Map<string, number>();
+      // step.id → new free-area position (for off-flow nodes)
+      const newFreePos = new Map<string, { x: number; y: number }>();
+      // step.id → new inFlow value (only for transitions)
+      const flowToggle = new Map<string, boolean>();
+      let touchedTopLevel = false;
+
       for (const ch of dragEnds) {
         if (ch.type !== 'position' || !ch.position) continue;
         const step = block.steps.find((s) => s.id === ch.id);
         if (!step || step.parentStepId) continue;
-        draggedTopLevelX.set(ch.id, ch.position.x);
-      }
-      if (draggedTopLevelX.size === 0) return;
+        touchedTopLevel = true;
 
-      // Build sortable list: top-level steps with their *effective* x.
-      const topLevel = block.steps.filter((s) => !s.parentStepId);
-      const withX = topLevel.map((s) => {
-        const draggedX = draggedTopLevelX.get(s.id);
+        const wasInFlow = step.inFlow !== false;
+        const dropY = ch.position.y;
+
+        // Containers always stay on the rail.
+        if (isContainerType(step.type)) {
+          newRailX.set(step.id, ch.position.x);
+          if (!wasInFlow) flowToggle.set(step.id, true);
+          continue;
+        }
+
+        const goesToRail = dropY < FREE_THRESHOLD_Y;
+        if (goesToRail) {
+          newRailX.set(step.id, ch.position.x);
+          if (!wasInFlow) flowToggle.set(step.id, true);
+        } else {
+          newFreePos.set(step.id, ch.position);
+          if (wasInFlow) flowToggle.set(step.id, false);
+        }
+      }
+      if (!touchedTopLevel) return;
+
+      // Recompute order for in-flow top-level steps based on effective x.
+      // Includes both currently in-flow steps and any newly attached.
+      const topLevelSteps = block.steps.filter((s) => !s.parentStepId);
+      const inFlowAfter = topLevelSteps.filter((s) => {
+        const toggled = flowToggle.get(s.id);
+        if (toggled !== undefined) return toggled;
+        return s.inFlow !== false;
+      });
+      const withX = inFlowAfter.map((s) => {
+        const draggedX = newRailX.get(s.id);
         if (draggedX !== undefined) return { step: s, x: draggedX };
-        // Use existing visual x from rfNodes for stable comparison.
         const node = rfNodes.find((n) => n.id === s.id);
         return { step: s, x: node?.position.x ?? s.order * 1000 };
       });
       withX.sort((a, b) => a.x - b.x);
-
       const orderMap = new Map<string, number>();
       withX.forEach(({ step }, i) => orderMap.set(step.id, i));
 
       onUpdateBlock({
-        steps: block.steps.map((s) =>
-          orderMap.has(s.id) ? { ...s, order: orderMap.get(s.id)! } : s,
-        ),
+        steps: block.steps.map((s) => {
+          if (s.parentStepId) return s;
+          const next: Step = { ...s };
+          if (orderMap.has(s.id)) next.order = orderMap.get(s.id)!;
+          if (flowToggle.has(s.id)) {
+            const nowInFlow = flowToggle.get(s.id)!;
+            if (nowInFlow) {
+              next.inFlow = true;
+              next.position = undefined;
+            } else {
+              next.inFlow = false;
+            }
+          }
+          if (newFreePos.has(s.id)) {
+            next.position = newFreePos.get(s.id);
+          }
+          return next;
+        }),
       });
     },
     [onNodesChange, block.steps, rfNodes, onUpdateBlock],
