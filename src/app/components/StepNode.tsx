@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Step } from '../types';
 import type { BlockStatus } from '../engine';
@@ -18,10 +18,12 @@ export interface StepNodeData {
 
 /**
  * ReactFlow custom node wrapping FlowchartStepView.
- * Renders one Handle per port (input on the left, output on the right)
- * so the user can wire individual port-to-port connections via drag.
  *
- * Handle ID format: "${portName}".
+ * Per-port Handles are rendered INSIDE FlowchartStepView at the same
+ * DOM position as the visible port dots, so the user can drag from
+ * exactly where they see the port. This component only adds a default
+ * Handle pair for nodes that have no manifest (e.g. wait, subroutine
+ * without a nodeId), giving them a generic connection point.
  */
 export const StepNode = memo(function StepNode({
   data,
@@ -29,22 +31,7 @@ export const StepNode = memo(function StepNode({
 }: NodeProps) {
   const d = data as unknown as StepNodeData;
   const node = d.nodeManifest;
-
-  // Compute port lists from manifest.
-  const inPorts = useMemo(
-    () =>
-      node
-        ? Object.entries(node.ports).filter(([, def]) => def.kind === 'in')
-        : [],
-    [node],
-  );
-  const outPorts = useMemo(
-    () =>
-      node
-        ? Object.entries(node.ports).filter(([, def]) => def.kind === 'out')
-        : [],
-    [node],
-  );
+  const hasPorts = !!node && Object.keys(node.ports).length > 0;
 
   return (
     <div className="relative">
@@ -59,68 +46,32 @@ export const StepNode = memo(function StepNode({
         onRunStep={d.onRunStep}
       />
 
-      {/* In-port handles (left side, distributed vertically) */}
-      {inPorts.length > 0 ? (
-        inPorts.map(([name], i) => (
+      {/* Fallback default handles when the node has no port definitions. */}
+      {!hasPorts && (
+        <>
           <Handle
-            key={`in-${name}`}
             type="target"
             position={Position.Left}
-            id={name}
+            id="__default__"
             style={{
-              top: `${30 + i * 14}px`,
               background: '#6366f1',
-              width: 9,
-              height: 9,
+              width: 11,
+              height: 11,
               border: '2px solid var(--fl-panel-2)',
             }}
-            title={`in: ${name}`}
           />
-        ))
-      ) : (
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="__default__"
-          style={{
-            background: '#6366f1',
-            width: 9,
-            height: 9,
-            border: '2px solid var(--fl-panel-2)',
-          }}
-        />
-      )}
-
-      {/* Out-port handles (right side) */}
-      {outPorts.length > 0 ? (
-        outPorts.map(([name], i) => (
           <Handle
-            key={`out-${name}`}
             type="source"
             position={Position.Right}
-            id={name}
+            id="__default__"
             style={{
-              top: `${30 + i * 14}px`,
               background: '#6366f1',
-              width: 9,
-              height: 9,
+              width: 11,
+              height: 11,
               border: '2px solid var(--fl-panel-2)',
             }}
-            title={`out: ${name}`}
           />
-        ))
-      ) : (
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="__default__"
-          style={{
-            background: '#6366f1',
-            width: 9,
-            height: 9,
-            border: '2px solid var(--fl-panel-2)',
-          }}
-        />
+        </>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Play, X } from 'lucide-react';
+import { Handle, Position } from '@xyflow/react';
 import type { PortBinding, Step } from '../types';
 import { STEP_META } from '../types';
 import type { BlockStatus } from '../engine';
@@ -237,14 +238,19 @@ export function FlowchartStepView({
             const val = getBindingValue(name);
             const bound = !!val;
             return (
-              <div key={name} className="flex items-center gap-1.5 py-0.5">
-                <span
-                  className={`inline-block h-[6px] w-[6px] flex-shrink-0 rounded-full${bound ? ' animate-pulse' : ''}`}
+              <div key={name} className="relative flex items-center gap-1.5 py-0.5">
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id={name}
+                  className={`!h-[12px] !w-[12px] !rounded-full !border-[2px] !border-solid${bound ? ' animate-pulse' : ''}`}
                   style={{
-                    background: bound ? accent : 'transparent',
-                    border: `1.5px solid ${bound ? accent : '#94a3b866'}`,
-                    boxShadow: bound ? `0 0 4px ${accent}66` : 'none',
+                    left: -14,
+                    background: bound ? accent : 'var(--fl-panel-2)',
+                    borderColor: bound ? accent : '#94a3b8aa',
+                    boxShadow: bound ? `0 0 6px ${accent}88` : 'none',
                   }}
+                  title={`in: ${name}`}
                 />
                 <span className="w-[60px] flex-shrink-0 font-mono text-[9px] text-fl-text-dim">
                   {name}
@@ -264,7 +270,7 @@ export function FlowchartStepView({
             const val = getBindingValue(name);
             const bound = !!val;
             return (
-              <div key={name} className="flex items-center justify-end gap-1.5 py-0.5">
+              <div key={name} className="relative flex items-center justify-end gap-1.5 py-0.5">
                 <input
                   list={datalistId}
                   value={val}
@@ -274,13 +280,18 @@ export function FlowchartStepView({
                   onClick={(e) => e.stopPropagation()}
                 />
                 <span className="font-mono text-[9px] text-fl-text-dim">{name}</span>
-                <span
-                  className={`inline-block h-[6px] w-[6px] flex-shrink-0 rounded-full${bound ? ' animate-pulse' : ''}`}
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={name}
+                  className={`!h-[12px] !w-[12px] !rounded-full !border-[2px] !border-solid${bound ? ' animate-pulse' : ''}`}
                   style={{
-                    background: bound ? accent : 'transparent',
-                    border: `1.5px solid ${bound ? accent : '#94a3b866'}`,
-                    boxShadow: bound ? `0 0 4px ${accent}66` : 'none',
+                    right: -14,
+                    background: bound ? accent : 'var(--fl-panel-2)',
+                    borderColor: bound ? accent : '#94a3b8aa',
+                    boxShadow: bound ? `0 0 6px ${accent}88` : 'none',
                   }}
+                  title={`out: ${name}`}
                 />
               </div>
             );
