@@ -95,7 +95,7 @@ export interface Block {
   catchSlot?: number;
   /** Flowchart editor: user-dragged position of the START pseudo-node. */
   startPos?: { x: number; y: number };
-  /** Flowchart editor: user-dragged position of the END pseudo-node. */
+  /** @deprecated End was removed from the flowchart; field kept for backwards compat with old serialized scenarios. */
   endPos?: { x: number; y: number };
   /**
    * Manual exec graph (Blueprint style). When undefined or empty,

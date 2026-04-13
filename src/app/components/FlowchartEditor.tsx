@@ -19,7 +19,7 @@ import { Breadcrumb } from './Breadcrumb';
 import { AddStepModal } from './AddStepModal';
 import { StepNode, type StepNodeData } from './StepNode';
 import { ContainerNode, type ContainerNodeData } from './ContainerNode';
-import { StartNode, EndNode, type StartNodeData, type EndNodeData } from './StartEndNodes';
+import { StartNode, type StartNodeData } from './StartEndNodes';
 import { ExecEdge } from './ExecEdge';
 interface Props {
   block: Block;
@@ -40,15 +40,13 @@ interface Props {
 }
 
 const START_ID = '__start__';
-const END_ID = '__end__';
 
-type AnyNodeData = StepNodeData | StartNodeData | EndNodeData | ContainerNodeData;
+type AnyNodeData = StepNodeData | StartNodeData | ContainerNodeData;
 
 const nodeTypes = {
   step: StepNode,
   container: ContainerNode,
   start: StartNode,
-  end: EndNode,
 };
 
 const edgeTypes = {
@@ -357,7 +355,9 @@ function FlowchartEditorInner({
       };
     };
 
-    // Start node — user-draggable; defaults to the far left.
+    // Start node — user-draggable; defaults to the far left. Hosts
+    // both block inputs AND outputs editors in one place (End was
+    // removed because it kept getting in the way).
     const startPos = block.startPos ?? { x: 0, y: NODE_Y_TOP };
     nodes.push({
       id: START_ID,
@@ -366,56 +366,41 @@ function FlowchartEditorInner({
       dragHandle: '.drag-handle',
       data: {
         inputs: block.inputs ?? {},
+        outputs: block.outputs ?? {},
         scenarioVariables,
         onAddInput: handleAddInput,
         onUpdateInput: handleUpdateInput,
         onRenameInput: handleRenameInput,
         onDeleteInput: handleDeleteInput,
-      } as StartNodeData,
-    });
-
-    // Top-level step nodes at their own positions.
-    let maxRightEdge = startPos.x + 260 + CHILD_GAP;
-    topLevel.forEach((step, idx) => {
-      const pos = resolveTopLevelPos(step, idx);
-      const size = renderStep(step, pos.x, pos.y, undefined);
-      maxRightEdge = Math.max(maxRightEdge, pos.x + size.w + CHILD_GAP);
-    });
-
-    // End node — user-draggable; defaults to the right of the rightmost step.
-    const endPos = block.endPos ?? { x: maxRightEdge, y: NODE_Y_TOP };
-    nodes.push({
-      id: END_ID,
-      type: 'end',
-      position: endPos,
-      dragHandle: '.drag-handle',
-      data: {
-        outputs: block.outputs ?? {},
-        scenarioVariables,
         onAddOutput: handleAddOutput,
         onUpdateOutput: handleUpdateOutput,
         onRenameOutput: handleRenameOutput,
         onDeleteOutput: handleDeleteOutput,
-      } as EndNodeData,
+      } as StartNodeData,
+    });
+
+    // Top-level step nodes at their own positions.
+    topLevel.forEach((step, idx) => {
+      const pos = resolveTopLevelPos(step, idx);
+      renderStep(step, pos.x, pos.y, undefined);
     });
 
     // Exec (control flow) edges — either manual from block.execEdges
     // or an auto linear fallback when no edges have been authored yet.
-    // The manual graph is fully user-editable: draw to connect, select
-    // + Delete to disconnect.
+    // The fallback now just chains Start → step0 → ... → stepN and
+    // stops at the last step (no End terminator).
     const manualExecEdges = block.execEdges;
     const effectiveExecEdges: Array<{ from: string; to: string }> =
       manualExecEdges && manualExecEdges.length > 0
         ? manualExecEdges
-        : [
-            { from: START_ID, to: topLevel[0]?.id ?? END_ID },
-            ...topLevel
-              .slice(0, -1)
-              .map((s, i) => ({ from: s.id, to: topLevel[i + 1].id })),
-            ...(topLevel.length > 0
-              ? [{ from: topLevel[topLevel.length - 1].id, to: END_ID }]
-              : []),
-          ];
+        : topLevel.length > 0
+          ? [
+              { from: START_ID, to: topLevel[0].id },
+              ...topLevel
+                .slice(0, -1)
+                .map((s, i) => ({ from: s.id, to: topLevel[i + 1].id })),
+            ]
+          : [];
     for (const e of effectiveExecEdges) {
       edges.push({
         id: `exec-${e.from}--${e.to}`,
@@ -482,7 +467,6 @@ function FlowchartEditorInner({
     block.inputs,
     block.outputs,
     block.startPos,
-    block.endPos,
     block.execEdges,
     executionStatus,
     manifestMap,
@@ -519,9 +503,8 @@ function FlowchartEditorInner({
       );
       if (dragEnds.length === 0) return;
 
-      // Collect Start/End drags separately — they persist to block.startPos/endPos.
+      // Start drag persists to block.startPos.
       let newStartPos: { x: number; y: number } | undefined;
-      let newEndPos: { x: number; y: number } | undefined;
       const stepPosUpdates = new Map<string, { x: number; y: number }>();
 
       for (const ch of dragEnds) {
@@ -530,17 +513,13 @@ function FlowchartEditorInner({
           newStartPos = ch.position;
           continue;
         }
-        if (ch.id === END_ID) {
-          newEndPos = ch.position;
-          continue;
-        }
         const step = block.steps.find((s) => s.id === ch.id);
         if (!step || step.parentStepId) continue; // top-level steps only
         stepPosUpdates.set(step.id, ch.position);
       }
 
       const touchedSteps = stepPosUpdates.size > 0;
-      const touchedAnchors = !!(newStartPos || newEndPos);
+      const touchedAnchors = !!newStartPos;
       if (!touchedSteps && !touchedAnchors) return;
 
       // Recompute order from x coordinates of all top-level steps so
@@ -571,28 +550,27 @@ function FlowchartEditorInner({
       const patch: Partial<Block> = {};
       if (touchedSteps) patch.steps = nextSteps;
       if (newStartPos) patch.startPos = newStartPos;
-      if (newEndPos) patch.endPos = newEndPos;
       onUpdateBlock(patch);
     },
     [onNodesChange, block.steps, rfNodes, onUpdateBlock],
   );
 
   // Compute the current effective exec graph (manual if set,
-  // otherwise the auto linear chain). Used to "snapshot → manual"
-  // on the first exec-edge edit so subsequent edits preserve intent.
+  // otherwise the auto linear chain Start → step[0] → ... → stepN).
+  // Used to "snapshot → manual" on the first exec-edge edit so
+  // subsequent edits preserve intent.
   const getEffectiveExecEdges = useCallback((): Array<{ from: string; to: string }> => {
     if (block.execEdges && block.execEdges.length > 0) return block.execEdges;
     const top = block.steps
       .filter((s) => !s.parentStepId)
       .sort((a, b) => a.order - b.order);
-    if (top.length === 0) return [{ from: START_ID, to: END_ID }];
+    if (top.length === 0) return [];
     const out: Array<{ from: string; to: string }> = [
       { from: START_ID, to: top[0].id },
     ];
     for (let i = 0; i < top.length - 1; i++) {
       out.push({ from: top[i].id, to: top[i + 1].id });
     }
-    out.push({ from: top[top.length - 1].id, to: END_ID });
     return out;
   }, [block.execEdges, block.steps]);
 
@@ -700,8 +678,8 @@ function FlowchartEditorInner({
         return;
       }
 
-      // Data wire: start/end are handled separately (block inputs/outputs).
-      if (source === START_ID || target === END_ID) return;
+      // Data wire: Start handles block IO separately.
+      if (source === START_ID || target === START_ID) return;
       const sourceStep = block.steps.find((s) => s.id === source);
       const targetStep = block.steps.find((s) => s.id === target);
       if (!sourceStep || !targetStep) return;
@@ -754,14 +732,11 @@ function FlowchartEditorInner({
 
     // Top-level insertion.
     //
-    // UX goals:
-    //   1. Auto-wire the new step into the exec chain right before
-    //      End, so the user doesn't have to re-wire on every add.
-    //   2. Pin End's current position so adding steps never pushes it
-    //      around.
-    //   3. Place the new step visually at the midpoint of the wire
-    //      it just cut into (previous tail → End), so it feels like
-    //      the chain naturally makes room for it.
+    // UX: auto-wire the new step into the exec chain after the
+    // current tail. The "tail" is whichever node currently has no
+    // outgoing exec edge — usually the last-added step, or Start
+    // when the chain is empty. The new step is placed just to the
+    // right of that tail so the chain extends naturally.
     const STEP_W_LOCAL = 320;
     const CHILD_GAP_LOCAL = 90;
     const NODE_Y_LOCAL = 200;
@@ -772,28 +747,15 @@ function FlowchartEditorInner({
 
     const startPos = block.startPos ?? { x: 0, y: NODE_Y_LOCAL };
 
-    // Compute the effective End position (before this add) so we can
-    // pin it and compute the midpoint.
-    const computeAutoEndPos = () => {
-      let maxRight = startPos.x + 260 + CHILD_GAP_LOCAL;
-      topLevel.forEach((s, idx) => {
-        const p =
-          s.position ?? {
-            x: 360 + idx * (STEP_W_LOCAL + CHILD_GAP_LOCAL),
-            y: NODE_Y_LOCAL,
-          };
-        maxRight = Math.max(maxRight, p.x + STEP_W_LOCAL + CHILD_GAP_LOCAL);
-      });
-      return { x: maxRight, y: startPos.y };
-    };
-    const currentEndPos = block.endPos ?? computeAutoEndPos();
-
-    // Find the current "tail before End" node so we know where to
-    // cut in. If the graph is empty or in a weird state, fall back
-    // to Start.
+    // Find the current tail = node with no outgoing exec edge.
     const currentEdges = getEffectiveExecEdges();
-    const edgeToEnd = currentEdges.find((e) => e.to === END_ID);
-    const tailId = edgeToEnd?.from ?? START_ID;
+    const hasOutgoing = new Set(currentEdges.map((e) => e.from));
+    const candidateIds = [START_ID, ...topLevel.map((s) => s.id)];
+    const tailId =
+      candidateIds.find((id) => !hasOutgoing.has(id)) ??
+      candidateIds[candidateIds.length - 1] ??
+      START_ID;
+
     const tailPos: { x: number; y: number } = (() => {
       if (tailId === START_ID) return startPos;
       const tailStep = block.steps.find((s) => s.id === tailId);
@@ -806,34 +768,28 @@ function FlowchartEditorInner({
       };
     })();
 
-    // Midpoint of the (tail → End) wire, minus half the step width
-    // so the node is centered on the wire.
-    const midX = (tailPos.x + currentEndPos.x) / 2 - STEP_W_LOCAL / 2;
-    const midY = (tailPos.y + currentEndPos.y) / 2;
+    // Place new step to the right of the tail.
+    const tailW = tailId === START_ID ? 260 : STEP_W_LOCAL;
+    const newPos = {
+      x: tailPos.x + tailW + CHILD_GAP_LOCAL,
+      y: tailPos.y,
+    };
 
     const newStep: Step = {
       ...step,
       order: topLevel.length,
-      position: { x: midX, y: midY },
+      position: newPos,
     };
 
-    // Rewire exec edges: replace every (X → End) with (X → newStep),
-    // then add (newStep → End). If there was no edge to End, just
-    // append (newStep → End).
-    const edgesToEnd = currentEdges.filter((e) => e.to === END_ID);
-    const nextEdges: Array<{ from: string; to: string }> =
-      edgesToEnd.length > 0
-        ? [
-            ...currentEdges.filter((e) => e.to !== END_ID),
-            ...edgesToEnd.map((e) => ({ from: e.from, to: newStep.id })),
-            { from: newStep.id, to: END_ID },
-          ]
-        : [...currentEdges, { from: newStep.id, to: END_ID }];
+    // Append (tail → newStep) to the exec graph.
+    const nextEdges: Array<{ from: string; to: string }> = [
+      ...currentEdges,
+      { from: tailId, to: newStep.id },
+    ];
 
     onUpdateBlock({
       steps: [...block.steps, newStep],
       execEdges: nextEdges,
-      endPos: currentEndPos,
     });
   };
 
@@ -875,8 +831,7 @@ function FlowchartEditorInner({
           />
           <MiniMap
             nodeColor={(n) => {
-              if (n.id === START_ID) return '#22c55e';
-              if (n.id === END_ID) return '#f43f5e';
+              if (n.id === START_ID) return '#14b8a6';
               return trackColor;
             }}
             style={{
