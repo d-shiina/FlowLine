@@ -4,7 +4,6 @@ import {
   Code2,
   Sun,
   Moon,
-  Terminal,
   FolderOpen,
   Save,
   BookOpen,
@@ -23,12 +22,11 @@ interface Props {
   nodeCount: number;
   theme: Theme;
   onToggleTheme: () => void;
-  pythonState: 'ready' | 'missing' | 'unknown';
-  onOpenPythonInstall: () => void;
 }
 
 /**
- * Main action toolbar: file ops, run, node editor, python status, theme.
+ * Main action toolbar: file ops, run, node editor, theme.
+ * Python status moved to the StatusBar at the bottom (VSCode style).
  */
 export function Toolbar({
   playing,
@@ -40,8 +38,6 @@ export function Toolbar({
   nodeCount,
   theme,
   onToggleTheme,
-  pythonState,
-  onOpenPythonInstall,
 }: Props) {
   const iconBtn =
     'flex h-7 items-center gap-1.5 rounded-md px-2.5 font-mono text-[10px] text-fl-text-faint transition-colors hover:bg-fl-panel-2 hover:text-fl-text';
@@ -102,38 +98,8 @@ export function Toolbar({
         )}
       </button>
 
-      {/* Python status */}
-      <button
-        type="button"
-        onClick={onOpenPythonInstall}
-        className="flex h-7 items-center gap-1 rounded-md px-2 font-mono text-[10px] font-bold transition-colors"
-        style={{
-          color:
-            pythonState === 'ready'
-              ? '#22c55e'
-              : pythonState === 'missing'
-                ? '#f59e0b'
-                : 'var(--fl-text-ghost)',
-        }}
-        title={
-          pythonState === 'ready'
-            ? 'Python: OK'
-            : pythonState === 'missing'
-              ? 'Python: 未インストール'
-              : 'Python: 確認中…'
-        }
-      >
-        <Terminal className="h-3 w-3" />
-        <span>
-          {pythonState === 'ready' ? '●' : pythonState === 'missing' ? '⚠' : '…'}
-        </span>
-      </button>
-
       {/* Right-aligned */}
-      <div className="ml-auto flex items-center gap-2">
-        <span className="font-mono text-[8px] text-fl-text-ghost">
-          Ctrl+Z=元に戻す / Del=削除
-        </span>
+      <div className="ml-auto">
         <button
           type="button"
           onClick={onToggleTheme}

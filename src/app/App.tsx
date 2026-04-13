@@ -10,6 +10,7 @@ import { Toolbar, type EditMode } from './components/Toolbar';
 import { FloatingToolbox } from './components/FloatingToolbox';
 import { ScenarioTabs } from './components/ScenarioTabs';
 import { useScenarioTabs } from './useScenarioTabs';
+import { StatusBar } from './components/StatusBar';
 import { Timeline } from './components/Timeline';
 import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
@@ -520,8 +521,6 @@ export default function App() {
         nodeCount={nodeManifest.length}
         theme={theme}
         onToggleTheme={toggleTheme}
-        pythonState={pythonChipState}
-        onOpenPythonInstall={() => setPythonModalOpen(true)}
       />
 
       <input
@@ -717,6 +716,15 @@ export default function App() {
         onSetVariable={store.setVariable}
         onRenameVariable={store.renameVariable}
         onDeleteVariable={store.deleteVariable}
+      />
+
+      <StatusBar
+        pythonState={pythonChipState}
+        onOpenPythonInstall={() => setPythonModalOpen(true)}
+        nodeCount={nodeManifest.length}
+        onOpenNodeEditor={() => setNodeEditorOpen(true)}
+        variableCount={Object.keys(scenario.variables.scenario).length}
+        phase={execution.state.phase}
       />
 
       {/* Modals */}
