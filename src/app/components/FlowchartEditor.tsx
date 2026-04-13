@@ -285,7 +285,9 @@ function FlowchartEditorInner({
               sourceHandle: '__exec__',
               target: child.id,
               targetHandle: '__exec__',
-              style: { stroke: '#cbd5e1', strokeWidth: 3 },
+              type: 'exec',
+              deletable: false,
+              selectable: false,
             });
           }
           childX += childSize.w + CHILD_GAP;
@@ -396,6 +398,10 @@ function FlowchartEditorInner({
         target: bId,
         targetHandle: '__exec__',
         type: 'exec',
+        // Auto-derived from `order` — cannot be deleted manually.
+        // Reorder by dragging a step horizontally.
+        deletable: false,
+        selectable: false,
       });
     }
 
@@ -434,6 +440,13 @@ function FlowchartEditorInner({
           label: binding.key,
           labelStyle: { fontSize: 8, fill: 'var(--fl-text-faint)' },
           labelBgStyle: { fill: 'var(--fl-panel-2)' },
+          data: {
+            kind: 'data',
+            writerStepId: writer.stepId,
+            writerPort: writer.portName,
+            readerStepId: step.id,
+            readerPort: portName,
+          },
         });
       }
     }
@@ -538,6 +551,50 @@ function FlowchartEditorInner({
     [onNodesChange, block.steps, rfNodes, onUpdateBlock],
   );
 
+  // ── Edge deletion (disconnect a data wire) ───
+  // The user selects an edge and presses Backspace/Delete. Only data
+  // edges are deletable (exec edges are auto-derived from order).
+  // Clearing a data wire means removing the shared-var binding from
+  // BOTH ends so the edge stops being derived on the next render.
+  const handleEdgesDelete = useCallback(
+    (deleted: Edge[]) => {
+      if (deleted.length === 0) return;
+      let steps = block.steps;
+      let changed = false;
+      for (const edge of deleted) {
+        const d = edge.data as
+          | {
+              kind?: string;
+              writerStepId?: string;
+              writerPort?: string;
+              readerStepId?: string;
+              readerPort?: string;
+            }
+          | undefined;
+        if (!d || d.kind !== 'data') continue;
+        const { writerStepId, writerPort, readerStepId, readerPort } = d;
+        if (!writerStepId || !writerPort || !readerStepId || !readerPort) continue;
+        steps = steps.map((s) => {
+          if (s.id === writerStepId && s.bindings && writerPort in s.bindings) {
+            const next = { ...s, bindings: { ...s.bindings } };
+            delete next.bindings[writerPort];
+            changed = true;
+            return next;
+          }
+          if (s.id === readerStepId && s.bindings && readerPort in s.bindings) {
+            const next = { ...s, bindings: { ...s.bindings } };
+            delete next.bindings[readerPort];
+            changed = true;
+            return next;
+          }
+          return s;
+        });
+      }
+      if (changed) onUpdateBlock({ steps });
+    },
+    [block.steps, onUpdateBlock],
+  );
+
   // ── Port-to-port connection (data flow) ───
   // When user drags from out-port handle to in-port handle, set both
   // step bindings to share a generated scenario variable key.
@@ -630,7 +687,9 @@ function FlowchartEditorInner({
           edges={edges}
           onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
+          onEdgesDelete={handleEdgesDelete}
           onConnect={handleConnect}
+          deleteKeyCode={['Backspace', 'Delete']}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView

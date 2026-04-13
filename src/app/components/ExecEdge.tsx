@@ -4,12 +4,15 @@ import { getBezierPath, type EdgeProps } from '@xyflow/react';
 /**
  * Custom edge for the Start → step → End exec chain.
  *
- * Visual recipe (Unity Bolt / Unreal Blueprint inspired):
- *   1. Outer "glow" path — thick, very translucent
- *   2. Main stroke — crisp, solid
- *   3. Animated "flow" dash — subtle stripes moving along the wire
- *      so it feels alive even when the scenario is not running
- *   4. Arrow marker at the target end
+ * No arrow head — direction is communicated purely by motion:
+ * small bright "energy packets" travel along the bezier path
+ * from source to target at a steady pace, like Unity Bolt's
+ * execution flow indicators.
+ *
+ * Layers (back to front):
+ *   1. Wide translucent halo
+ *   2. Crisp main stroke
+ *   3. Three staggered glowing particles animated via <animateMotion>
  */
 export const ExecEdge = memo(function ExecEdge({
   id,
@@ -31,57 +34,55 @@ export const ExecEdge = memo(function ExecEdge({
     curvature: 0.45,
   });
 
-  const main = selected ? '#f8fafc' : '#cbd5e1';
-  const glow = selected ? '#f8fafc' : '#94a3b8';
-  const arrowId = `exec-arrow-${id}`;
+  const main = selected ? '#f8fafc' : '#94a3b8';
+  const halo = selected ? '#f8fafc' : '#64748b';
+  const particle = selected ? '#ffffff' : '#e2e8f0';
+  const pathId = `exec-path-${id}`;
 
   return (
     <>
-      <defs>
-        <marker
-          id={arrowId}
-          viewBox="0 0 12 12"
-          refX="10"
-          refY="6"
-          markerWidth="7"
-          markerHeight="7"
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 12 6 L 0 12 z" fill={main} />
-        </marker>
-      </defs>
-
       {/* Outer glow halo */}
       <path
         d={edgePath}
         fill="none"
-        stroke={glow}
-        strokeWidth={10}
-        strokeOpacity={0.18}
+        stroke={halo}
+        strokeWidth={9}
+        strokeOpacity={0.16}
         strokeLinecap="round"
       />
 
-      {/* Main stroke */}
+      {/* Main stroke — the exec wire itself */}
       <path
+        id={pathId}
         d={edgePath}
         fill="none"
         stroke={main}
-        strokeWidth={2.5}
+        strokeWidth={2}
+        strokeOpacity={0.85}
         strokeLinecap="round"
-        markerEnd={`url(#${arrowId})`}
       />
 
-      {/* Animated flow stripes — slow drift so it feels alive */}
-      <path
-        d={edgePath}
-        fill="none"
-        stroke="#ffffff"
-        strokeOpacity={0.35}
-        strokeWidth={2.5}
-        strokeLinecap="round"
-        strokeDasharray="4 14"
-        style={{ animation: 'exec-flow 2s linear infinite' }}
-      />
+      {/* Flowing energy packets — three staggered particles along the path */}
+      {[0, 0.66, 1.33].map((delay, i) => (
+        <circle key={i} r={3.5} fill={particle} opacity={0.95}>
+          <animate
+            attributeName="opacity"
+            values="0;1;1;0"
+            keyTimes="0;0.15;0.85;1"
+            dur="2s"
+            begin={`${delay}s`}
+            repeatCount="indefinite"
+          />
+          <animateMotion
+            dur="2s"
+            begin={`${delay}s`}
+            repeatCount="indefinite"
+            rotate="auto"
+          >
+            <mpath href={`#${pathId}`} />
+          </animateMotion>
+        </circle>
+      ))}
     </>
   );
 });
