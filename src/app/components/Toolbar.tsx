@@ -19,14 +19,11 @@ interface Props {
   onToggleTheme: () => void;
   pythonState: 'ready' | 'missing' | 'unknown';
   onOpenPythonInstall: () => void;
-  /** Current edit mode hint. */
-  editMode: EditMode | null;
 }
 
 /**
  * Slim action bar below the titlebar.
- * Contains: run/stop, node editor, python status, theme toggle,
- * and an inline edit-mode hint.
+ * Contains: run/stop, node editor, python status, theme toggle.
  */
 export function Toolbar({
   playing,
@@ -37,7 +34,6 @@ export function Toolbar({
   onToggleTheme,
   pythonState,
   onOpenPythonInstall,
-  editMode,
 }: Props) {
   const chipBase =
     'flex items-center gap-1 rounded-md border border-fl-border-strong bg-fl-panel-2 px-2.5 py-1 font-mono text-[9px] font-bold text-fl-text-dim transition-colors hover:border-fl-text-dim hover:text-fl-text';
@@ -123,23 +119,6 @@ export function Toolbar({
             ? '⚠'
             : '…'}
       </button>
-
-      {/* Edit mode hint */}
-      {editMode && (
-        <>
-          <div className="mx-1 h-4 w-px bg-fl-border" />
-          <div
-            className="font-mono text-[9px] font-bold"
-            style={{
-              color: editMode === 'block' ? '#3b82f6' : '#f43f5e',
-            }}
-          >
-            {editMode === 'block'
-              ? '▶ クリックでブロック配置'
-              : '⬡ クリックで同期ポイント配置'}
-          </div>
-        </>
-      )}
 
       {/* Right-aligned items */}
       <div className="ml-auto flex items-center gap-1.5">

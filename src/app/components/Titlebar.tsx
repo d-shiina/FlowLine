@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   Minus,
   Square,
@@ -7,31 +7,24 @@ import {
   FolderOpen,
   Save,
   BookOpen,
-  ChevronDown,
 } from 'lucide-react';
 
 interface Props {
-  scenarioName: string;
-  onRenameScenario: (name: string) => void;
   onImport: () => void;
   onExport: () => void;
   onSample: () => void;
+  /** Scenario tabs rendered in the center of the titlebar. */
+  tabs?: ReactNode;
 }
 
 /**
  * Custom titlebar for the frameless Electron window.
  *
- * Left: FLOWLINE logo + scenario name (editable)
- * Center: file operations (open / save / sample)
+ * Left: FL logo + file operations (open / save / sample)
+ * Center: scenario tabs (switchable)
  * Right: window controls (minimize / maximize / close)
  */
-export function Titlebar({
-  scenarioName,
-  onRenameScenario,
-  onImport,
-  onExport,
-  onSample,
-}: Props) {
+export function Titlebar({ onImport, onExport, onSample, tabs }: Props) {
   const api = typeof window !== 'undefined' ? window.flowlineWindow : undefined;
   const [maximized, setMaximized] = useState(false);
 
@@ -53,29 +46,15 @@ export function Titlebar({
       className="flex h-9 flex-shrink-0 items-center border-b border-fl-border bg-fl-panel"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      {/* Left: logo + scenario name */}
+      {/* Left: logo + file operations */}
       <div
-        className="flex items-center gap-2 pl-3"
+        className="flex flex-shrink-0 items-center gap-2 pl-3"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <span className="font-mono text-[11px] font-bold tracking-wider text-fl-text-dim">
           FL
         </span>
         <span className="text-fl-text-ghost">|</span>
-        <input
-          value={scenarioName}
-          onChange={(e) => onRenameScenario(e.target.value)}
-          placeholder="シナリオ名"
-          className="w-40 truncate bg-transparent font-mono text-[10px] text-fl-text-muted outline-none placeholder:text-fl-text-ghost focus:text-fl-text"
-          title="シナリオ名 (クリックで編集)"
-        />
-      </div>
-
-      {/* Center: file operations */}
-      <div
-        className="flex items-center gap-0.5 pl-4"
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
         <button
           type="button"
           onClick={onImport}
@@ -102,13 +81,13 @@ export function Titlebar({
         </button>
       </div>
 
-      {/* Spacer (draggable) */}
-      <div className="flex-1" />
+      {/* Center: scenario tabs */}
+      {tabs}
 
       {/* Right: window controls */}
       {api && (
         <div
-          className="flex h-full"
+          className="flex h-full flex-shrink-0"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           <button

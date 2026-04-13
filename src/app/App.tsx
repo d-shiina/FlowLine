@@ -8,6 +8,8 @@ import { ERROR_HANDLER_ID } from './types';
 import { Titlebar } from './components/Titlebar';
 import { Toolbar, type EditMode } from './components/Toolbar';
 import { FloatingToolbox } from './components/FloatingToolbox';
+import { ScenarioTabs } from './components/ScenarioTabs';
+import { useScenarioTabs } from './useScenarioTabs';
 import { Timeline } from './components/Timeline';
 import { AddBlockModal } from './components/AddBlockModal';
 import { SyncModal } from './components/SyncModal';
@@ -34,7 +36,35 @@ type EditorMode =
 export default function App() {
   const store = useScenario();
   const { scenario } = store;
+  const tabsStore = useScenarioTabs(scenario);
   const { theme, toggle: toggleTheme } = useTheme();
+
+  // Keep the active tab's snapshot in sync with the live scenario.
+  useEffect(() => {
+    tabsStore.syncActive(scenario);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenario]);
+
+  const handleSwitchTab = useCallback(
+    (targetId: string) => {
+      const next = tabsStore.switchTab(targetId, scenario);
+      if (next) store.replace(next);
+    },
+    [tabsStore, scenario, store],
+  );
+
+  const handleNewTab = useCallback(() => {
+    const next = tabsStore.openTab();
+    store.replace(next);
+  }, [tabsStore, store]);
+
+  const handleCloseTab = useCallback(
+    (targetId: string) => {
+      const next = tabsStore.closeTab(targetId, scenario);
+      if (next) store.replace(next);
+    },
+    [tabsStore, scenario, store],
+  );
 
   // ─── editor mode (scenario vs subroutine) ──────────────────────────
   const [editorMode, setEditorMode] = useState<EditorMode>({
@@ -473,11 +503,18 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-fl-bg font-mono text-fl-text">
       <Titlebar
-        scenarioName={scenario.name}
-        onRenameScenario={store.renameScenario}
         onImport={handleImport}
         onExport={handleExport}
         onSample={() => setSamplesOpen(true)}
+        tabs={
+          <ScenarioTabs
+            tabs={tabsStore.tabs}
+            activeId={tabsStore.activeId}
+            onSwitch={handleSwitchTab}
+            onClose={handleCloseTab}
+            onNewTab={handleNewTab}
+          />
+        }
       />
       <Toolbar
         playing={playing}
@@ -488,7 +525,6 @@ export default function App() {
         onToggleTheme={toggleTheme}
         pythonState={pythonChipState}
         onOpenPythonInstall={() => setPythonModalOpen(true)}
-        editMode={mode === 'block' || mode === 'sync' ? mode : null}
       />
 
       <input
