@@ -1,5 +1,6 @@
 import { Box, Hexagon, Redo2, Undo2 } from 'lucide-react';
-import type { EditMode } from './Toolbar';
+
+export type EditMode = 'block' | 'sync';
 
 interface Props {
   mode: EditMode;
