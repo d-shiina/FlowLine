@@ -230,8 +230,8 @@ function FlowchartEditorInner({
     };
 
     // Recursively render a step (and its children, if container).
-    // Returns the size used. If step.position is set, that overrides
-    // the auto-computed (x, y).
+    // Returns the size used. Position is always auto-computed left-to-right
+    // by order; drag updates the order field rather than free position.
     const renderStep = (
       step: Step,
       x: number,
@@ -244,7 +244,7 @@ function FlowchartEditorInner({
         step.type === 'switch' ||
         step.type === 'group';
       const size = measure(step);
-      const pos = step.position ?? { x, y };
+      const pos = { x, y };
 
       if (isContainer) {
         const kids = childrenOf(step.id);
@@ -364,17 +364,10 @@ function FlowchartEditorInner({
       } as EndNodeData,
     });
 
-    // Top-level chain edges: Start → step0 → ... → End
-    const chain: string[] = [START_ID, ...topLevel.map((s) => s.id), END_ID];
-    for (let i = 0; i < chain.length - 1; i++) {
-      edges.push({
-        id: `e-${chain[i]}-${chain[i + 1]}`,
-        source: chain[i],
-        target: chain[i + 1],
-        type: 'add',
-        data: { onAdd: () => handleOpenAdd(i) } as AddEdgeData,
-      });
-    }
+    // Note: chain edges (Start → step0 → step1 → ... → End) were
+    // removed because they collided with port-to-port wiring on the
+    // node handles. Adding new steps now uses the floating "+" button
+    // and right-click menu instead.
 
     // Data-flow edges: derived from shared scenario variable keys.
     // Walks ALL steps (including nested) so cross-container connections show.
@@ -433,7 +426,6 @@ function FlowchartEditorInner({
     handleUpdateOutput,
     handleRenameOutput,
     handleDeleteOutput,
-    handleOpenAdd,
     onRunStep,
     running,
   ]);
@@ -458,29 +450,46 @@ function FlowchartEditorInner({
       });
       onNodesChange(filtered);
 
-      // On drag end: persist new positions to step.position so the
-      // user's manual layout sticks across re-renders. Topological
-      // execution order is independent of visual position.
+      // On drag end of a top-level step: re-derive `order` from the
+      // dragged node's x position, so dragging horizontally reorders
+      // the step within the flow. Nested children (with parentId) are
+      // ignored — they reorder via the container's child layout.
       const dragEnds = filtered.filter(
         (c) => c.type === 'position' && !c.dragging && c.position,
       );
-      if (dragEnds.length > 0) {
-        const positionUpdates = new Map<string, { x: number; y: number }>();
-        for (const ch of dragEnds) {
-          if (ch.type === 'position' && ch.position) {
-            positionUpdates.set(ch.id, ch.position);
-          }
-        }
-        onUpdateBlock({
-          steps: block.steps.map((s) =>
-            positionUpdates.has(s.id)
-              ? { ...s, position: positionUpdates.get(s.id)! }
-              : s,
-          ),
-        });
+      if (dragEnds.length === 0) return;
+
+      // Collect new x positions for top-level steps only.
+      const draggedTopLevelX = new Map<string, number>();
+      for (const ch of dragEnds) {
+        if (ch.type !== 'position' || !ch.position) continue;
+        const step = block.steps.find((s) => s.id === ch.id);
+        if (!step || step.parentStepId) continue;
+        draggedTopLevelX.set(ch.id, ch.position.x);
       }
+      if (draggedTopLevelX.size === 0) return;
+
+      // Build sortable list: top-level steps with their *effective* x.
+      const topLevel = block.steps.filter((s) => !s.parentStepId);
+      const withX = topLevel.map((s) => {
+        const draggedX = draggedTopLevelX.get(s.id);
+        if (draggedX !== undefined) return { step: s, x: draggedX };
+        // Use existing visual x from rfNodes for stable comparison.
+        const node = rfNodes.find((n) => n.id === s.id);
+        return { step: s, x: node?.position.x ?? s.order * 1000 };
+      });
+      withX.sort((a, b) => a.x - b.x);
+
+      const orderMap = new Map<string, number>();
+      withX.forEach(({ step }, i) => orderMap.set(step.id, i));
+
+      onUpdateBlock({
+        steps: block.steps.map((s) =>
+          orderMap.has(s.id) ? { ...s, order: orderMap.get(s.id)! } : s,
+        ),
+      });
     },
-    [onNodesChange, block.steps, onUpdateBlock],
+    [onNodesChange, block.steps, rfNodes, onUpdateBlock],
   );
 
   // ── Port-to-port connection (data flow) ───
@@ -614,6 +623,22 @@ function FlowchartEditorInner({
           />
           {block.label}
         </div>
+
+        {/* Floating "+" button to add a new top-level step at the end. */}
+        <button
+          type="button"
+          onClick={() => {
+            const topLevelCount = block.steps.filter(
+              (s) => !s.parentStepId,
+            ).length;
+            handleOpenAdd(topLevelCount);
+          }}
+          className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-lg border border-fl-border bg-fl-panel px-3 py-1.5 font-mono text-[10px] font-bold text-fl-text shadow transition-colors hover:border-[#3b82f6] hover:text-[#3b82f6]"
+          title="ステップを追加"
+        >
+          <span className="text-base leading-none">+</span>
+          ステップ追加
+        </button>
       </div>
 
       <AddStepModal
