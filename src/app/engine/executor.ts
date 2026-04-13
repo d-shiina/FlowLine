@@ -301,13 +301,11 @@ export class Executor {
     }
     this.flush();
 
-    // Top-level steps (both in-flow on the exec rail and off-flow
-    // "pure" nodes). Topo sort places writers before readers so pure
-    // nodes that produce data are evaluated before any in-flow
-    // consumer reads from them.
-    const topLevel = this.topoSortSteps(
-      block.steps.filter((s) => !s.parentStepId),
-    );
+    // Top-level steps. If the block has a manual exec graph, walk it
+    // from __start__; otherwise fall back to bindings-based topo sort.
+    const topLevelRaw = block.steps.filter((s) => !s.parentStepId);
+    const fromExec = this.orderByExecGraph(block, topLevelRaw);
+    const topLevel = fromExec ?? this.topoSortSteps(topLevelRaw);
 
     // Find start index
     const startIdx = topLevel.findIndex((s) => s.id === startStepId);
@@ -513,11 +511,13 @@ export class Executor {
     }
     this.flush();
 
-    // Include both in-flow and off-flow steps. Topo sort orders by
-    // data dependencies so pure (off-flow) nodes run before any
-    // in-flow consumer that reads their outputs via shared var keys.
+    // If the block has a manual exec graph (Block.execEdges), walk
+    // it from __start__ and skip unreachable steps. Otherwise fall
+    // back to bindings-based topological sort over all top-level
+    // steps so existing scenarios behave as before.
     const topLevelRaw = block.steps.filter((s) => !s.parentStepId);
-    const topLevel = this.topoSortSteps(topLevelRaw);
+    const fromExec = this.orderByExecGraph(block, topLevelRaw);
+    const topLevel = fromExec ?? this.topoSortSteps(topLevelRaw);
 
     let failed = false;
     for (const step of topLevel) {
@@ -701,6 +701,69 @@ export class Executor {
           (branch === undefined || (s.parentBranch ?? '') === branch),
       )
       .sort((a, b) => a.order - b.order);
+  }
+
+  /**
+   * Order top-level steps by walking Block.execEdges from `__start__`.
+   * Only steps reachable from Start are executed; unreachable steps
+   * (intentionally disconnected by the user) are skipped. Returns
+   * null when the block has no manual exec graph, so callers fall
+   * back to topoSortSteps (bindings-based).
+   */
+  private orderByExecGraph(block: Block, steps: Step[]): Step[] | null {
+    const execEdges = block.execEdges;
+    if (!execEdges || execEdges.length === 0) return null;
+
+    const stepMap = new Map<string, Step>();
+    for (const s of steps) stepMap.set(s.id, s);
+
+    const adj = new Map<string, string[]>();
+    for (const e of execEdges) {
+      if (!adj.has(e.from)) adj.set(e.from, []);
+      adj.get(e.from)!.push(e.to);
+    }
+
+    // Collect reachable node ids from __start__.
+    const reachable = new Set<string>();
+    const stack: string[] = ['__start__'];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      if (reachable.has(id)) continue;
+      reachable.add(id);
+      for (const n of adj.get(id) ?? []) stack.push(n);
+    }
+
+    // Kahn's on the reachable subgraph.
+    const subIndeg = new Map<string, number>();
+    for (const id of reachable) subIndeg.set(id, 0);
+    for (const [from, tos] of adj) {
+      if (!reachable.has(from)) continue;
+      for (const to of tos) {
+        if (!reachable.has(to)) continue;
+        subIndeg.set(to, (subIndeg.get(to) ?? 0) + 1);
+      }
+    }
+    const queue: string[] = [];
+    for (const [id, d] of subIndeg) if (d === 0) queue.push(id);
+
+    const result: Step[] = [];
+    const seen = new Set<string>();
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (id !== '__start__' && id !== '__end__') {
+        const s = stepMap.get(id);
+        if (s) result.push(s);
+      }
+      for (const n of adj.get(id) ?? []) {
+        if (!reachable.has(n)) continue;
+        const d = (subIndeg.get(n) ?? 1) - 1;
+        subIndeg.set(n, d);
+        if (d === 0) queue.push(n);
+      }
+    }
+    return result;
   }
 
   /**

@@ -97,6 +97,15 @@ export interface Block {
   startPos?: { x: number; y: number };
   /** Flowchart editor: user-dragged position of the END pseudo-node. */
   endPos?: { x: number; y: number };
+  /**
+   * Manual exec graph (Blueprint style). When undefined or empty,
+   * the editor falls back to an auto-generated linear chain
+   * Start → step[0] → ... → step[N] → End derived from `step.order`.
+   * Once the user draws or deletes an exec wire, the full graph is
+   * snapshotted here and the editor switches to manual mode.
+   * Executor walks this graph starting from `__start__`.
+   */
+  execEdges?: Array<{ from: string; to: string }>;
 }
 
 export interface Track {
