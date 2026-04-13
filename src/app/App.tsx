@@ -9,6 +9,8 @@ import { Titlebar } from './components/Titlebar';
 import { FloatingToolbox, type EditMode } from './components/FloatingToolbox';
 import { ScenarioTabs } from './components/ScenarioTabs';
 import { useScenarioTabs } from './useScenarioTabs';
+import { useRecentScenarios, type RecentEntry } from './useRecentScenarios';
+import { WelcomePage } from './components/WelcomePage';
 import { StatusBar } from './components/StatusBar';
 import { Timeline } from './components/Timeline';
 import { AddBlockModal } from './components/AddBlockModal';
@@ -37,13 +39,17 @@ export default function App() {
   const store = useScenario();
   const { scenario } = store;
   const tabsStore = useScenarioTabs(scenario);
+  const recent = useRecentScenarios();
   const { theme, toggle: toggleTheme } = useTheme();
+
+  const isWelcomeActive = tabsStore.activeTab?.kind === 'welcome';
 
   // Keep the active tab's snapshot in sync with the live scenario.
   useEffect(() => {
+    if (isWelcomeActive) return;
     tabsStore.syncActive(scenario);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenario]);
+  }, [scenario, isWelcomeActive]);
 
   const handleSwitchTab = useCallback(
     (targetId: string) => {
@@ -57,6 +63,16 @@ export default function App() {
     const next = tabsStore.openTab();
     store.replace(next);
   }, [tabsStore, store]);
+
+  const handleOpenRecent = useCallback(
+    (entry: RecentEntry) => {
+      // Recent entries don't currently store the scenario content, so
+      // fall back to the file picker for now.
+      void entry;
+      fileInputRef.current?.click();
+    },
+    [],
+  );
 
   const handleCloseTab = useCallback(
     (targetId: string) => {
@@ -288,7 +304,16 @@ export default function App() {
             }
           }
 
-          store.replace(result.scenario as Scenario);
+          const imported = result.scenario as Scenario;
+          // Open in a new tab so it doesn't overwrite existing work.
+          if (isWelcomeActive || tabsStore.tabs.length === 0) {
+            tabsStore.openTab(imported);
+          }
+          store.replace(imported);
+          recent.add({
+            name: imported.name || '(無題)',
+            trackCount: imported.tracks?.length ?? 0,
+          });
           setSelected(null);
           return;
         }
@@ -299,7 +324,7 @@ export default function App() {
 
     // Fallback: browser file picker.
     fileInputRef.current?.click();
-  }, [store, setNodeManifest]);
+  }, [store, setNodeManifest, isWelcomeActive, tabsStore, recent]);
 
   // Legacy browser file handler (used when flowlineScenario API is unavailable).
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -313,7 +338,15 @@ export default function App() {
       }
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { embeddedNodes: _unused, ...clean } = parsed;
-      store.replace(clean as Scenario);
+      const cleaned = clean as Scenario;
+      if (isWelcomeActive || tabsStore.tabs.length === 0) {
+        tabsStore.openTab(cleaned);
+      }
+      store.replace(cleaned);
+      recent.add({
+        name: cleaned.name || '(無題)',
+        trackCount: cleaned.tracks?.length ?? 0,
+      });
       setSelected(null);
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -366,10 +399,17 @@ export default function App() {
   const [nodeEditorOpen, setNodeEditorOpen] = useState(false);
   const handleLoadSample = useCallback(
     (next: Scenario) => {
+      if (isWelcomeActive) {
+        tabsStore.openTab(next);
+      }
       store.replace(next);
+      recent.add({
+        name: next.name || '(サンプル)',
+        trackCount: next.tracks?.length ?? 0,
+      });
       setSelected(null);
     },
-    [store],
+    [store, isWelcomeActive, tabsStore, recent],
   );
 
   // ─── copy / paste clipboard ────────────────────────────────────────
@@ -571,7 +611,7 @@ export default function App() {
       )}
 
       <div className={`flex min-h-0 flex-1 ${editingBlock ? 'hidden' : ''}`}>
-        <SubroutineSidebar
+        {!isWelcomeActive && <SubroutineSidebar
           subroutines={scenario.subroutines}
           activeSubroutineId={
             editorMode.type === 'subroutine' ? editorMode.id : null
@@ -596,9 +636,18 @@ export default function App() {
             setEditorMode({ type: 'subroutine', id });
             setSelected(null);
           }}
-        />
+        />}
         <div className="relative min-h-0 flex-1">
-          {editorMode.type === 'scenario' ? (
+          {isWelcomeActive ? (
+            <WelcomePage
+              recent={recent.recent}
+              onNewScenario={handleNewTab}
+              onOpenFile={handleImport}
+              onOpenSamples={() => setSamplesOpen(true)}
+              onOpenRecent={handleOpenRecent}
+              onRemoveRecent={recent.remove}
+            />
+          ) : editorMode.type === 'scenario' ? (
             <Timeline
               scenario={scenario}
               blockStatus={blockStatus}
@@ -691,13 +740,15 @@ export default function App() {
           />
         </div>
 
-        <Inspector
-          block={selectedBlock}
-          trackId={selected?.trackId ?? null}
-          isErrorHandler={isErrorHandlerSelection}
-          onChange={store.updateBlock}
-          onClose={() => setSelected(null)}
-        />
+        {!isWelcomeActive && (
+          <Inspector
+            block={selectedBlock}
+            trackId={selected?.trackId ?? null}
+            isErrorHandler={isErrorHandlerSelection}
+            onChange={store.updateBlock}
+            onClose={() => setSelected(null)}
+          />
+        )}
       </div>
 
       {/* Bottom panel: logs + variables tabs */}

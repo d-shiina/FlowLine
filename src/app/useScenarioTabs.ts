@@ -3,31 +3,30 @@ import type { Scenario } from './types';
 import { cloneSample, DEFAULT_SAMPLE } from './samples';
 
 /**
- * Per-tab metadata. The actual active scenario lives in `useScenario`
- * (via store.replace on tab switch); inactive tabs keep a snapshot here.
+ * Per-tab metadata. Scenario tabs hold a full scenario snapshot; the
+ * welcome tab is a special placeholder with no scenario.
  */
 export interface ScenarioTab {
   id: string;
-  /** Display label shown on the tab. */
+  kind: 'scenario' | 'welcome';
   title: string;
-  /** Full serialised scenario state. Updated on tab switch from the active store. */
-  snapshot: Scenario;
+  /** Full scenario snapshot. Undefined for welcome tab. */
+  snapshot?: Scenario;
 }
 
 export interface UseScenarioTabs {
   tabs: ScenarioTab[];
   activeId: string;
-  /** Switch to a tab. Caller provides current active scenario so it can be saved. */
+  activeTab: ScenarioTab | undefined;
   switchTab: (targetId: string, currentScenario: Scenario) => Scenario | null;
-  /** Open a new empty or preloaded scenario tab. Returns the new scenario to load. */
   openTab: (scenario?: Scenario, title?: string) => Scenario;
-  /** Close a tab. If closing the active one, returns the scenario of the tab that should become active. */
+  openWelcome: () => void;
   closeTab: (targetId: string, currentScenario: Scenario) => Scenario | null;
-  /** Rename the active tab (e.g. when scenario.name changes). */
   renameActive: (title: string) => void;
-  /** Update the active tab's snapshot (for dirty tracking / tab switch). */
   syncActive: (scenario: Scenario) => void;
 }
+
+const WELCOME_TAB_ID = '__welcome__';
 
 function makeTabId(): string {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -38,24 +37,27 @@ function emptyScenario(name = '新規シナリオ'): Scenario {
   return { ...base, name };
 }
 
-/**
- * Manages a list of scenario tabs and the active one.
- * Each tab holds a full scenario snapshot; the active tab's scenario
- * lives in the main `useScenario` store and is synced back here on
- * tab switch / close.
- */
+function welcomeTab(): ScenarioTab {
+  return {
+    id: WELCOME_TAB_ID,
+    kind: 'welcome',
+    title: 'ようこそ',
+  };
+}
+
 export function useScenarioTabs(
   initialScenario: Scenario,
 ): UseScenarioTabs {
-  const initialTab: ScenarioTab = {
-    id: makeTabId(),
-    title: initialScenario.name || '空のシナリオ',
-    snapshot: initialScenario,
-  };
-  const [tabs, setTabs] = useState<ScenarioTab[]>([initialTab]);
-  const [activeId, setActiveId] = useState<string>(initialTab.id);
+  // Start with just the welcome tab; the initialScenario is stashed
+  // so the first "new scenario" action can reuse it as the starting state.
+  const [tabs, setTabs] = useState<ScenarioTab[]>(() => [welcomeTab()]);
+  const [activeId, setActiveId] = useState<string>(WELCOME_TAB_ID);
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+
+  const initialRef = useRef<Scenario | null>(initialScenario);
+
+  const activeTab = tabs.find((t) => t.id === activeId);
 
   const switchTab = useCallback(
     (targetId: string, currentScenario: Scenario): Scenario | null => {
@@ -64,34 +66,46 @@ export function useScenarioTabs(
       if (!target) return null;
       setTabs((prev) =>
         prev.map((t) =>
-          t.id === activeIdRef.current
-            ? { ...t, snapshot: currentScenario, title: currentScenario.name || t.title }
+          t.id === activeIdRef.current && t.kind === 'scenario'
+            ? {
+                ...t,
+                snapshot: currentScenario,
+                title: currentScenario.name || t.title,
+              }
             : t,
         ),
       );
       setActiveId(targetId);
-      return target.snapshot;
+      return target.snapshot ?? null;
     },
     [tabs],
   );
 
   const openTab = useCallback(
     (scenario?: Scenario, title?: string): Scenario => {
-      const s = scenario ?? emptyScenario();
+      const s = scenario ?? initialRef.current ?? emptyScenario();
+      initialRef.current = null;
       const tab: ScenarioTab = {
         id: makeTabId(),
+        kind: 'scenario',
         title: title ?? s.name ?? '新規シナリオ',
         snapshot: s,
       };
-      setTabs((prev) => {
-        // Save current active tab's snapshot before switching
-        return [...prev, tab];
-      });
+      setTabs((prev) => [...prev, tab]);
       setActiveId(tab.id);
       return s;
     },
     [],
   );
+
+  const openWelcome = useCallback(() => {
+    setTabs((prev) => {
+      const has = prev.some((t) => t.kind === 'welcome');
+      if (has) return prev;
+      return [welcomeTab(), ...prev];
+    });
+    setActiveId(WELCOME_TAB_ID);
+  }, []);
 
   const closeTab = useCallback(
     (targetId: string, currentScenario: Scenario): Scenario | null => {
@@ -99,23 +113,32 @@ export function useScenarioTabs(
       setTabs((prev) => {
         const idx = prev.findIndex((t) => t.id === targetId);
         if (idx === -1) return prev;
-        // Don't close the last tab — reset it to a blank one instead.
-        if (prev.length === 1) {
-          const blank = emptyScenario();
-          next = blank;
-          return [{ ...prev[0], snapshot: blank, title: blank.name }];
-        }
         const wasActive = targetId === activeIdRef.current;
+
         const updated = prev.map((t) =>
-          t.id === activeIdRef.current && !wasActive
-            ? { ...t, snapshot: currentScenario, title: currentScenario.name || t.title }
+          t.id === activeIdRef.current && !wasActive && t.kind === 'scenario'
+            ? {
+                ...t,
+                snapshot: currentScenario,
+                title: currentScenario.name || t.title,
+              }
             : t,
         );
+
         const without = updated.filter((t) => t.id !== targetId);
+
+        // If nothing is left, fall back to a welcome tab.
+        if (without.length === 0) {
+          const w = welcomeTab();
+          setActiveId(w.id);
+          next = null;
+          return [w];
+        }
+
         if (wasActive) {
           const fallback = without[Math.max(0, idx - 1)] ?? without[0];
           setActiveId(fallback.id);
-          next = fallback.snapshot;
+          next = fallback.snapshot ?? null;
         }
         return without;
       });
@@ -133,23 +156,24 @@ export function useScenarioTabs(
   const syncActive = useCallback((scenario: Scenario) => {
     setTabs((prev) =>
       prev.map((t) =>
-        t.id === activeIdRef.current
+        t.id === activeIdRef.current && t.kind === 'scenario'
           ? { ...t, snapshot: scenario, title: scenario.name || t.title }
           : t,
       ),
     );
   }, []);
 
-  // Keep the active tab's title in sync with its scenario name.
   useEffect(() => {
-    // no-op — syncActive is called explicitly by the caller.
+    // no-op placeholder
   }, []);
 
   return {
     tabs,
     activeId,
+    activeTab,
     switchTab,
     openTab,
+    openWelcome,
     closeTab,
     renameActive,
     syncActive,
