@@ -761,24 +761,6 @@ function FlowchartEditorInner({
     return [...seen.values()];
   }, [block.inputs, block.outputs, block.steps, scenarioVariables]);
 
-  const handleBindVarToPort = useCallback(
-    (nodeId: string, portName: string, varKey: string) => {
-      onUpdateBlock({
-        steps: block.steps.map((s) => {
-          if (s.id !== nodeId) return s;
-          return {
-            ...s,
-            bindings: {
-              ...s.bindings,
-              [portName]: { kind: 'var' as const, key: varKey },
-            },
-          };
-        }),
-      });
-    },
-    [block.steps, onUpdateBlock],
-  );
-
   const handleAddStep = (step: Step) => {
     if (addStepParent) {
       // Insert as a child of the container step at the end of its current children.
@@ -935,11 +917,8 @@ function FlowchartEditorInner({
           ステップ追加
         </button>
 
-        {/* Variable palette — drag chips onto data port handles. */}
-        <VariablePalette
-          variables={blockVariables}
-          onBindToPort={handleBindVarToPort}
-        />
+        {/* Variable palette — read-only reference of in-scope vars. */}
+        <VariablePalette variables={blockVariables} />
       </div>
 
       <AddStepModal
