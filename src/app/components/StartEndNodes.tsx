@@ -1,9 +1,10 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Plus, Play, Trash2, StopCircle } from 'lucide-react';
+import type { BlockInputBinding } from '../types';
 
 export interface StartNodeData {
-  inputs: Record<string, string>;
+  inputs: Record<string, BlockInputBinding>;
   scenarioVariables: Record<string, unknown>;
   onAddInput: (name: string, key: string) => void;
   onUpdateInput: (name: string, key: string) => void;
@@ -76,17 +77,25 @@ export const StartNode = memo(function StartNode({ data }: NodeProps) {
             シナリオ変数を受け取る
           </div>
         )}
-        {entries.map(([name, key]) => (
-          <InputRow
-            key={name}
-            name={name}
-            varKey={key}
-            datalistId={datalistId}
-            onUpdate={(newKey) => d.onUpdateInput(name, newKey)}
-            onRename={(newName) => d.onRenameInput(name, newName)}
-            onDelete={() => d.onDeleteInput(name)}
-          />
-        ))}
+        {entries.map(([name, binding]) => {
+          const displayKey =
+            binding.kind === 'var'
+              ? binding.key
+              : binding.kind === 'literal'
+                ? `(literal: ${String(binding.value)})`
+                : `← ${binding.fromBlockId}.${binding.fromPort}`;
+          return (
+            <InputRow
+              key={name}
+              name={name}
+              varKey={displayKey}
+              datalistId={datalistId}
+              onUpdate={(newKey) => d.onUpdateInput(name, newKey)}
+              onRename={(newName) => d.onRenameInput(name, newName)}
+              onDelete={() => d.onDeleteInput(name)}
+            />
+          );
+        })}
 
         {/* Add new input row */}
         <div className="mt-1 flex items-center gap-1 border-t border-fl-border pt-1">

@@ -48,6 +48,21 @@ export type PortBinding =
  * Control flow (loop / branch / switch) is expressed as Step types
  * inside the flowchart rather than as block-level attributes.
  */
+/**
+ * How a block input is sourced.
+ *
+ * - `var`        — read a value from a scenario variable (config / constants)
+ * - `literal`    — hardcoded value
+ * - `connection` — wired from another block's output port (data flow arrow)
+ *
+ * Connections enforce ordering: a block waits for its connection sources to
+ * complete before it can run, regardless of slot order.
+ */
+export type BlockInputBinding =
+  | { kind: 'var'; key: string }
+  | { kind: 'literal'; value: unknown }
+  | { kind: 'connection'; fromBlockId: string; fromPort: string };
+
 export interface Block {
   id: string;
   label: string;
@@ -56,15 +71,16 @@ export interface Block {
   /** Internal flowchart steps, executed top-to-bottom by order. */
   steps: Step[];
   /**
-   * Input variables the block reads from the scenario/timeline at start.
-   * Maps local input name → scenario variable key (e.g. "url" → "scenario.target_url").
-   * Rendered as the Start node's output ports.
+   * Input bindings: localName → source.
+   * Three source kinds: var (scenario), literal, connection (arrow from
+   * another block's output port).
    */
-  inputs?: Record<string, string>;
+  inputs?: Record<string, BlockInputBinding>;
   /**
-   * Output variables the block writes back to the scenario at end.
-   * Maps local output name → scenario variable key.
-   * Rendered as the End node's input ports.
+   * Output port declarations: localName → optional scenario variable key.
+   * The block's run produces a value for each output port; if a scenarioKey
+   * is provided, the value is also persisted into scenario variables.
+   * Other blocks consume this port via { kind: 'connection', fromPort: name }.
    */
   outputs?: Record<string, string>;
   /** Max runtime in seconds for the whole task. Undefined = no limit. */

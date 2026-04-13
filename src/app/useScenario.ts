@@ -1,5 +1,12 @@
 import { useCallback, useState } from 'react';
-import type { Block, Scenario, Subroutine, SyncPoint, Track } from './types';
+import type {
+  Block,
+  BlockInputBinding,
+  Scenario,
+  Subroutine,
+  SyncPoint,
+  Track,
+} from './types';
 import { ERROR_HANDLER_COLOR, ERROR_HANDLER_ID, TRACK_COLORS } from './types';
 import { DEFAULT_SAMPLE, cloneSample } from './samples';
 
@@ -69,6 +76,47 @@ function mapContainerBlocks(
     };
   }
   return s;
+}
+
+/**
+ * Migrate legacy block.inputs that were stored as Record<string, string>
+ * (raw scenario keys) into the new BlockInputBinding union format.
+ * Idempotent: if the value is already an object with a `kind` field, leave it.
+ */
+function migrateBlock(b: Block): Block {
+  if (!b.inputs) return b;
+  let changed = false;
+  const next: Record<string, BlockInputBinding> = {};
+  for (const [name, raw] of Object.entries(b.inputs)) {
+    if (typeof raw === 'string') {
+      next[name] = { kind: 'var', key: raw };
+      changed = true;
+    } else if (raw && typeof raw === 'object' && 'kind' in raw) {
+      next[name] = raw as BlockInputBinding;
+    } else {
+      next[name] = { kind: 'var', key: String(raw ?? '') };
+      changed = true;
+    }
+  }
+  return changed ? { ...b, inputs: next } : b;
+}
+
+function migrateBlockInputs(s: Scenario): Scenario {
+  return {
+    ...s,
+    tracks: s.tracks.map((t) => ({
+      ...t,
+      blocks: t.blocks.map(migrateBlock),
+    })),
+    errorHandler: {
+      ...s.errorHandler,
+      blocks: s.errorHandler.blocks.map(migrateBlock),
+    },
+    subroutines: s.subroutines.map((sub) => ({
+      ...sub,
+      blocks: sub.blocks.map(migrateBlock),
+    })),
+  };
 }
 
 const HISTORY_LIMIT = 50;
@@ -179,7 +227,10 @@ export function useScenario(): ScenarioStore {
               blocks: [],
             },
           };
-      commit(() => withHandler);
+      // Backward-compat: legacy block.inputs stored as Record<string, string>
+      // (raw scenario keys). Wrap them in { kind: 'var', key } bindings.
+      const migrated = migrateBlockInputs(withHandler);
+      commit(() => migrated);
     },
     [commit],
   );

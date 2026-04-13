@@ -88,6 +88,15 @@ export class Executor {
    */
   private variables: Map<string, unknown>;
 
+  /**
+   * In-memory channel store for block-to-block connections.
+   * Key format: `${blockId}::${portName}`.
+   * When a block writes an output port, its value lands here. Downstream
+   * blocks with `{ kind: 'connection', fromBlockId, fromPort }` inputs
+   * read from this store when they execute.
+   */
+  private channels: Map<string, unknown> = new Map();
+
   private options: ExecutionOptions;
 
   constructor(
@@ -117,6 +126,9 @@ export class Executor {
   async run(): Promise<void> {
     const { singleBlockId, startStepId, singleStepId } = this.options;
     const isPartial = !!(singleBlockId || singleStepId);
+
+    // Reset the channel store for this run.
+    this.channels.clear();
 
     // Initialize every block's status to idle so the UI can distinguish
     // "not yet executed" from "absent".
@@ -385,6 +397,24 @@ export class Executor {
         continue;
       }
 
+      // Wait for any blocks this block depends on via connection inputs.
+      // This enforces explicit data-flow ordering across tracks without
+      // needing a sync point.
+      const dependencyIds = this.collectConnectionDeps(block);
+      if (dependencyIds.length > 0) {
+        this.log(
+          'info',
+          track.id,
+          block.id,
+          `データ依存待機: ${dependencyIds.length} 件`,
+        );
+        await this.waitForBlocks(dependencyIds);
+        if (this.aborted) {
+          this.markCancelled(block.id);
+          continue;
+        }
+      }
+
       this.state.currentSlot[track.id] = block.slot;
       await this.executeBlockOrGroup(track.id, track.blocks, block, {
         isErrorHandler: false,
@@ -393,6 +423,21 @@ export class Executor {
     // Clear the per-track playhead once the track drains.
     delete this.state.currentSlot[track.id];
     this.flush();
+  }
+
+  /**
+   * Collect block IDs this block depends on via `connection` input bindings.
+   * The block can't run until all of these have reached a terminal state.
+   */
+  private collectConnectionDeps(block: Block): string[] {
+    if (!block.inputs) return [];
+    const ids = new Set<string>();
+    for (const binding of Object.values(block.inputs)) {
+      if (binding.kind === 'connection') {
+        ids.add(binding.fromBlockId);
+      }
+    }
+    return [...ids];
   }
 
   /**
@@ -425,19 +470,34 @@ export class Executor {
     this.log('info', containerId, block.id, `タスク「${block.label}」開始`);
     this.flush();
 
-    // START node: seed local block inputs from scenario variables.
-    // block.inputs = { localName: 'scenario.someKey' }
-    // Makes scenario.someKey's value available as local.localName within the block.
+    // START node: resolve block inputs from their bindings.
+    // Three binding kinds:
+    //   - var:        read from scenario variable
+    //   - literal:    use the hardcoded value
+    //   - connection: read from another block's output channel
     if (block.inputs) {
-      for (const [localName, scenarioKey] of Object.entries(block.inputs)) {
-        const value = this.variables.get(scenarioKey);
+      for (const [localName, binding] of Object.entries(block.inputs)) {
+        let value: unknown;
+        let source = '';
+        if (binding.kind === 'var') {
+          value = this.variables.get(binding.key);
+          source = binding.key;
+        } else if (binding.kind === 'literal') {
+          value = binding.value;
+          source = `literal`;
+        } else if (binding.kind === 'connection') {
+          value = this.channels.get(
+            `${binding.fromBlockId}::${binding.fromPort}`,
+          );
+          source = `${binding.fromBlockId}.${binding.fromPort}`;
+        }
         if (value !== undefined) {
           this.variables.set(`local.${block.id}.${localName}`, value);
           this.log(
             'info',
             containerId,
             block.id,
-            `[START] ${localName} ← ${scenarioKey} = ${JSON.stringify(value)}`,
+            `[START] ${localName} ← ${source} = ${JSON.stringify(value)}`,
           );
         }
       }
@@ -466,19 +526,32 @@ export class Executor {
       }
     }
 
-    // END node: write block outputs back to scenario variables.
+    // END node: publish output port values to:
+    //   1) the in-memory channel store (so connected downstream blocks read it)
+    //   2) optionally to a scenario variable (if outputs[name] is non-empty)
     if (!failed && !this.aborted && block.outputs) {
       for (const [localName, scenarioKey] of Object.entries(block.outputs)) {
         const value =
           this.variables.get(`local.${block.id}.${localName}`) ??
           this.variables.get(`scenario.${localName}`);
-        if (value !== undefined) {
+        if (value === undefined) continue;
+        // Always publish to the channel store for connection consumers.
+        this.channels.set(`${block.id}::${localName}`, value);
+        // Optionally also write to a scenario variable.
+        if (scenarioKey) {
           this.variables.set(scenarioKey, value);
           this.log(
             'info',
             containerId,
             block.id,
             `[END] ${scenarioKey} ← ${localName} = ${JSON.stringify(value)}`,
+          );
+        } else {
+          this.log(
+            'info',
+            containerId,
+            block.id,
+            `[END] channel(${localName}) = ${JSON.stringify(value)}`,
           );
         }
       }

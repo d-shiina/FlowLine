@@ -12,7 +12,7 @@ import {
   type NodeChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { Block, Step, Subroutine } from '../types';
+import type { Block, BlockInputBinding, Step, Subroutine } from '../types';
 import type { BlockStatus } from '../engine';
 import type { NodeManifestEntry } from '../../globals';
 import { Breadcrumb } from './Breadcrumb';
@@ -116,16 +116,18 @@ function FlowchartEditorInner({
     [block.steps, onUpdateBlock],
   );
 
-  // Block inputs mutations
+  // Block inputs mutations — wrap raw scenario keys in { kind: 'var' } bindings.
   const handleAddInput = useCallback(
     (name: string, key: string) => {
-      onUpdateBlock({ inputs: { ...block.inputs, [name]: key } });
+      const binding: BlockInputBinding = { kind: 'var', key };
+      onUpdateBlock({ inputs: { ...block.inputs, [name]: binding } });
     },
     [block.inputs, onUpdateBlock],
   );
   const handleUpdateInput = useCallback(
     (name: string, key: string) => {
-      onUpdateBlock({ inputs: { ...block.inputs, [name]: key } });
+      const binding: BlockInputBinding = { kind: 'var', key };
+      onUpdateBlock({ inputs: { ...block.inputs, [name]: binding } });
     },
     [block.inputs, onUpdateBlock],
   );
@@ -133,7 +135,7 @@ function FlowchartEditorInner({
     (oldName: string, newName: string) => {
       if (oldName === newName || !newName.trim()) return;
       const next = { ...block.inputs };
-      next[newName] = next[oldName] ?? '';
+      next[newName] = next[oldName] ?? { kind: 'var' as const, key: '' };
       delete next[oldName];
       onUpdateBlock({ inputs: next });
     },

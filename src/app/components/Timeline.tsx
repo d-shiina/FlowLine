@@ -1,8 +1,16 @@
-import { Fragment, useMemo } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Plus, Trash2, AlertTriangle } from 'lucide-react';
-import type { Block, Scenario } from '../types';
+import type { Block, BlockInputBinding, Scenario } from '../types';
 import type { BlockStatus } from '../engine';
 import { TimelineBlock } from './TimelineBlock';
+import { ConnectionLayer, type DragLine } from './ConnectionLayer';
 
 // ── Layout constants ────────────────────────
 const SLOT_W = 150;
@@ -80,9 +88,146 @@ export function Timeline({
 
   const canvasW = totalSlots * SLOT_W;
 
+  // Connection layer: track total inner height for SVG sizing.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [innerSize, setInnerSize] = useState({ w: 0, h: 0 });
+  const [dragLine, setDragLine] = useState<DragLine | null>(null);
+
+  // Recompute inner size when content changes via ResizeObserver.
+  useEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+    const update = () => setInnerSize({ w: el.scrollWidth, h: el.scrollHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [scenario]);
+
+  // Find all blocks for connection lookups.
+  const findBlock = useCallback(
+    (blockId: string): Block | null => {
+      for (const t of scenario.tracks) {
+        const b = t.blocks.find((x) => x.id === blockId);
+        if (b) return b;
+      }
+      return scenario.errorHandler.blocks.find((x) => x.id === blockId) ?? null;
+    },
+    [scenario],
+  );
+
+  const findBlockTrackId = useCallback(
+    (blockId: string): string | null => {
+      for (const t of scenario.tracks) {
+        if (t.blocks.some((x) => x.id === blockId)) return t.id;
+      }
+      if (scenario.errorHandler.blocks.some((x) => x.id === blockId)) {
+        return scenario.errorHandler.id;
+      }
+      return null;
+    },
+    [scenario],
+  );
+
+  // Mousedown on a port dot: start a connection drag.
+  const handleContainerMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const portEl = target.closest<HTMLElement>('[data-port-id]');
+      if (!portEl) return;
+      const startSide = portEl.dataset.portSide;
+      const startBlockId = portEl.dataset.portBlock!;
+      const startPortName = portEl.dataset.portName!;
+      // Connections are out → in.
+      // If user starts on an in-port, treat as a "delete/replace" target?
+      // For now: only allow start from out-port.
+      if (startSide !== 'out') return;
+      e.stopPropagation();
+      e.preventDefault();
+
+      const container = containerRef.current!;
+      const containerRect = container.getBoundingClientRect();
+      const startRect = portEl.getBoundingClientRect();
+      const startX =
+        startRect.left -
+        containerRect.left +
+        container.scrollLeft +
+        startRect.width / 2;
+      const startY =
+        startRect.top -
+        containerRect.top +
+        container.scrollTop +
+        startRect.height / 2;
+
+      setDragLine({ x1: startX, y1: startY, x2: startX, y2: startY });
+
+      const onMove = (ev: MouseEvent) => {
+        const x =
+          ev.clientX - containerRect.left + container.scrollLeft;
+        const y = ev.clientY - containerRect.top + container.scrollTop;
+        setDragLine({ x1: startX, y1: startY, x2: x, y2: y });
+      };
+
+      const onUp = (ev: MouseEvent) => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        setDragLine(null);
+        // Hit-test for an in-port at the drop location.
+        const dropEl = document
+          .elementFromPoint(ev.clientX, ev.clientY)
+          ?.closest<HTMLElement>('[data-port-id]');
+        if (!dropEl) return;
+        if (dropEl.dataset.portSide !== 'in') return;
+        const targetBlockId = dropEl.dataset.portBlock!;
+        const targetPortName = dropEl.dataset.portName!;
+        // Don't connect to self.
+        if (targetBlockId === startBlockId) return;
+        // Update target block's input binding to a connection.
+        const targetBlock = findBlock(targetBlockId);
+        const trackId = findBlockTrackId(targetBlockId);
+        if (!targetBlock || !trackId) return;
+        const newBinding: BlockInputBinding = {
+          kind: 'connection',
+          fromBlockId: startBlockId,
+          fromPort: startPortName,
+        };
+        onUpdateBlock(trackId, targetBlockId, {
+          inputs: { ...targetBlock.inputs, [targetPortName]: newBinding },
+        });
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [findBlock, findBlockTrackId, onUpdateBlock],
+  );
+
+  const handleDeleteConnection = useCallback(
+    (
+      _fromBlockId: string,
+      _fromPort: string,
+      toBlockId: string,
+      toPort: string,
+    ) => {
+      const targetBlock = findBlock(toBlockId);
+      const trackId = findBlockTrackId(toBlockId);
+      if (!targetBlock || !trackId || !targetBlock.inputs) return;
+      const next = { ...targetBlock.inputs };
+      delete next[toPort];
+      onUpdateBlock(trackId, toBlockId, { inputs: next });
+    },
+    [findBlock, findBlockTrackId, onUpdateBlock],
+  );
+
   return (
-    <div className="fl-scroll relative h-full w-full overflow-auto bg-fl-bg">
+    <div
+      ref={containerRef}
+      className="fl-scroll relative h-full w-full overflow-auto bg-fl-bg"
+      onMouseDown={handleContainerMouseDown}
+    >
       <div
+        ref={innerRef}
         className="grid"
         style={{
           gridTemplateColumns: `${LEFT_W}px ${canvasW}px`,
@@ -249,6 +394,16 @@ export function Timeline({
           ))}
         </TrackCanvas>
       </div>
+
+      {/* Connection overlay (SVG bezier paths between block ports) */}
+      <ConnectionLayer
+        scenario={scenario}
+        containerRef={containerRef}
+        width={innerSize.w || canvasW + LEFT_W}
+        height={innerSize.h || 600}
+        dragLine={dragLine}
+        onDeleteConnection={handleDeleteConnection}
+      />
 
       {/* Sync point labels floating over the ruler */}
       {scenario.syncPoints.map((sp) => (

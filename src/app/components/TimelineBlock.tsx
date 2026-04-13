@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { X, ChevronDown, ChevronUp, Plus } from 'lucide-react';
-import type { Block } from '../types';
+import type { Block, BlockInputBinding } from '../types';
 import type { BlockStatus } from '../engine';
 
 interface Props {
@@ -15,7 +15,7 @@ interface Props {
   onOpen: () => void;
   onDelete: () => void;
   onSlotChange: (newSlot: number) => void;
-  onUpdateInputs: (inputs: Record<string, string>) => void;
+  onUpdateInputs: (inputs: Record<string, BlockInputBinding>) => void;
   onUpdateOutputs: (outputs: Record<string, string>) => void;
 }
 
@@ -82,8 +82,19 @@ export function TimelineBlock({
   const stepCount = block.steps?.length ?? 0;
   const inputs = block.inputs ?? {};
   const outputs = block.outputs ?? {};
-  const inputEntries = Object.entries(inputs);
-  const outputEntries = Object.entries(outputs);
+  // For inputs we display a string for each binding (var key, literal text,
+  // or a connection label). The IoSection works on Array<[name, string]>.
+  const inputEntries: Array<[string, string]> = Object.entries(inputs).map(
+    ([name, b]) => [
+      name,
+      b.kind === 'var'
+        ? b.key
+        : b.kind === 'literal'
+          ? String(b.value ?? '')
+          : `← ${b.fromBlockId}.${b.fromPort}`,
+    ],
+  );
+  const outputEntries: Array<[string, string]> = Object.entries(outputs);
 
   const dragInfoRef = useRef<{
     startX: number;
@@ -299,13 +310,31 @@ export function TimelineBlock({
             accent={accent}
             entries={inputEntries}
             scenarioVariables={scenarioVariables}
-            onChange={onUpdateInputs}
+            blockId={block.id}
+            side="in"
+            onChange={(next) => {
+              // Wrap raw strings as { kind: 'var' } bindings.
+              const wrapped: Record<string, BlockInputBinding> = {};
+              for (const [name, key] of Object.entries(next)) {
+                // Preserve existing connection bindings if the key matches the
+                // connection display string (starts with "← ").
+                const existing = inputs[name];
+                if (existing && existing.kind === 'connection' && key.startsWith('← ')) {
+                  wrapped[name] = existing;
+                } else {
+                  wrapped[name] = { kind: 'var', key };
+                }
+              }
+              onUpdateInputs(wrapped);
+            }}
           />
           <IoSection
             label="OUT"
             accent={accent}
             entries={outputEntries}
             scenarioVariables={scenarioVariables}
+            blockId={block.id}
+            side="out"
             onChange={onUpdateOutputs}
           />
         </div>
@@ -321,12 +350,16 @@ function IoSection({
   accent,
   entries,
   scenarioVariables,
+  blockId,
+  side,
   onChange,
 }: {
   label: string;
   accent: string;
   entries: Array<[string, string]>;
   scenarioVariables: Record<string, unknown>;
+  blockId: string;
+  side: 'in' | 'out';
   onChange: (next: Record<string, string>) => void;
 }) {
   const [draftName, setDraftName] = useState('');
@@ -370,8 +403,16 @@ function IoSection({
       {entries.map(([name, key]) => (
         <div key={name} className="flex items-center gap-1 py-0.5">
           <span
-            className="inline-block h-1 w-1 flex-shrink-0 rounded-full"
-            style={{ background: accent }}
+            className="inline-block h-2 w-2 flex-shrink-0 cursor-crosshair rounded-full transition-transform hover:scale-150"
+            data-port-id={`${blockId}::${side}::${name}`}
+            data-port-side={side}
+            data-port-block={blockId}
+            data-port-name={name}
+            style={{
+              background: accent,
+              boxShadow: `0 0 4px ${accent}88`,
+            }}
+            title={`${side === 'in' ? '入力' : '出力'}: ${name}`}
           />
           <input
             defaultValue={name}
