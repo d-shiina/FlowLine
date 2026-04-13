@@ -1,5 +1,7 @@
-import { Terminal, Code2, Variable, Activity } from 'lucide-react';
+import { Terminal, Code2, Variable, Activity, Puzzle } from 'lucide-react';
 import type { ExecutionPhase } from '../engine';
+import type { Subroutine } from '../types';
+import { SubroutinePopover } from './SubroutinePopover';
 
 interface Props {
   pythonState: 'ready' | 'missing' | 'unknown';
@@ -8,6 +10,12 @@ interface Props {
   onOpenNodeEditor: () => void;
   variableCount: number;
   phase: ExecutionPhase;
+  // Subroutines
+  subroutines: Subroutine[];
+  activeSubroutineId: string | null;
+  onAddSubroutine: () => void;
+  onEditSubroutine: (id: string) => void;
+  onDeleteSubroutine: (id: string) => void;
 }
 
 const PHASE_LABEL: Record<ExecutionPhase, string> = {
@@ -28,8 +36,7 @@ const PHASE_COLOR: Record<ExecutionPhase, string> = {
 
 /**
  * VSCode-style status bar at the very bottom of the window.
- * Shows Python runtime state, node count, execution phase, etc.
- * Items are clickable where they link to a relevant action.
+ * Shows runtime state, counts, and the execution phase.
  */
 export function StatusBar({
   pythonState,
@@ -38,6 +45,11 @@ export function StatusBar({
   onOpenNodeEditor,
   variableCount,
   phase,
+  subroutines,
+  activeSubroutineId,
+  onAddSubroutine,
+  onEditSubroutine,
+  onDeleteSubroutine,
 }: Props) {
   const itemClass =
     'flex h-full items-center gap-1 px-2 font-mono text-[9px] transition-colors hover:bg-fl-panel-2';
@@ -79,6 +91,24 @@ export function StatusBar({
         <Code2 className="h-2.5 w-2.5" />
         <span>{nodeCount} ノード</span>
       </button>
+
+      {/* Subroutines — scenario-scoped custom nodes */}
+      <SubroutinePopover
+        subroutines={subroutines}
+        activeId={activeSubroutineId}
+        onAdd={onAddSubroutine}
+        onEdit={onEditSubroutine}
+        onDelete={onDeleteSubroutine}
+      >
+        <button
+          type="button"
+          className={itemClass + ' text-fl-text-faint'}
+          title="サブルーチンを管理"
+        >
+          <Puzzle className="h-2.5 w-2.5" />
+          <span>{subroutines.length} サブルーチン</span>
+        </button>
+      </SubroutinePopover>
 
       <div className={itemClass + ' text-fl-text-faint pointer-events-none'}>
         <Variable className="h-2.5 w-2.5" />

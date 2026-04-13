@@ -20,7 +20,6 @@ import { SamplesModal } from './components/SamplesModal';
 import { NodeEditor } from './components/NodeEditor';
 import { PythonInstallModal } from './components/PythonInstallModal';
 import type { PythonStatus } from '../globals';
-import { SubroutineSidebar } from './components/SubroutineSidebar';
 import { Inspector } from './components/Inspector';
 import { BottomPanel } from './components/BottomPanel';
 import { FlowchartEditor } from './components/FlowchartEditor';
@@ -611,32 +610,6 @@ export default function App() {
       )}
 
       <div className={`flex min-h-0 flex-1 ${editingBlock ? 'hidden' : ''}`}>
-        {!isWelcomeActive && <SubroutineSidebar
-          subroutines={scenario.subroutines}
-          activeSubroutineId={
-            editorMode.type === 'subroutine' ? editorMode.id : null
-          }
-          onAdd={(name) => {
-            store.addSubroutine(name);
-          }}
-          onRename={store.renameSubroutine}
-          onDelete={(id) => {
-            // If we're currently editing this subroutine, close the editor
-            // before deleting so selection doesn't dangle.
-            if (
-              editorMode.type === 'subroutine' &&
-              editorMode.id === id
-            ) {
-              setEditorMode({ type: 'scenario' });
-              setSelected(null);
-            }
-            store.deleteSubroutine(id);
-          }}
-          onOpen={(id) => {
-            setEditorMode({ type: 'subroutine', id });
-            setSelected(null);
-          }}
-        />}
         <div className="relative min-h-0 flex-1">
           {isWelcomeActive ? (
             <WelcomePage
@@ -730,14 +703,16 @@ export default function App() {
           )}
           </div>
           )}
-          <FloatingToolbox
-            mode={mode}
-            onModeChange={setMode}
-            canUndo={store.canUndo}
-            canRedo={store.canRedo}
-            onUndo={store.undo}
-            onRedo={store.redo}
-          />
+          {!isWelcomeActive && (
+            <FloatingToolbox
+              mode={mode}
+              onModeChange={setMode}
+              canUndo={store.canUndo}
+              canRedo={store.canRedo}
+              onUndo={store.undo}
+              onRedo={store.redo}
+            />
+          )}
         </div>
 
         {!isWelcomeActive && (
@@ -772,6 +747,25 @@ export default function App() {
         onOpenNodeEditor={() => setNodeEditorOpen(true)}
         variableCount={Object.keys(scenario.variables.scenario).length}
         phase={execution.state.phase}
+        subroutines={scenario.subroutines}
+        activeSubroutineId={
+          editorMode.type === 'subroutine' ? editorMode.id : null
+        }
+        onAddSubroutine={() => {
+          const name = `サブルーチン ${scenario.subroutines.length + 1}`;
+          store.addSubroutine(name);
+        }}
+        onEditSubroutine={(id) => {
+          setEditorMode({ type: 'subroutine', id });
+          setSelected(null);
+        }}
+        onDeleteSubroutine={(id) => {
+          if (editorMode.type === 'subroutine' && editorMode.id === id) {
+            setEditorMode({ type: 'scenario' });
+            setSelected(null);
+          }
+          store.deleteSubroutine(id);
+        }}
       />
 
       {/* Modals */}
