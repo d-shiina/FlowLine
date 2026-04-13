@@ -20,7 +20,6 @@ import { AddStepModal } from './AddStepModal';
 import { StepNode, type StepNodeData } from './StepNode';
 import { ContainerNode, type ContainerNodeData } from './ContainerNode';
 import { StartNode, EndNode, type StartNodeData, type EndNodeData } from './StartEndNodes';
-import { AddEdge, type AddEdgeData } from './AddEdge';
 interface Props {
   block: Block;
   trackName: string;
@@ -49,10 +48,6 @@ const nodeTypes = {
   container: ContainerNode,
   start: StartNode,
   end: EndNode,
-};
-
-const edgeTypes = {
-  add: AddEdge,
 };
 
 function reorderSteps(steps: Step[]): Step[] {
@@ -285,14 +280,7 @@ function FlowchartEditorInner({
               sourceHandle: '__exec__',
               target: child.id,
               targetHandle: '__exec__',
-              type: 'add',
               style: { stroke: '#cbd5e1', strokeWidth: 3 },
-              data: {
-                onAdd: () => {
-                  setAddStepParent(step.id);
-                  setAddStepOpen(true);
-                },
-              } as AddEdgeData,
             });
           }
           childX += childSize.w + CHILD_GAP;
@@ -320,24 +308,31 @@ function FlowchartEditorInner({
       return size;
     };
 
-    // Top-level steps: split into "in flow" (on the exec rail) and
-    // "off flow" (free-area pure nodes that connect via data wires only).
+    // Top-level steps: all free-positioned. If a step has no stored
+    // position yet (freshly added), fall back to a grid computed from
+    // its `order` so it lands in a sensible spot.
     const topLevel = block.steps
       .filter((s) => !s.parentStepId)
       .sort((a, b) => a.order - b.order);
 
-    const inFlowSteps = topLevel.filter((s) => s.inFlow !== false);
-    const offFlowSteps = topLevel.filter((s) => s.inFlow === false);
+    const NODE_Y_TOP = 200;
+    const GRID_ORIGIN_X = 320;
+    const GRID_COL_W = STEP_W + CHILD_GAP;
 
-    const NODE_Y_TOP = 100;
-    const FREE_AREA_Y = NODE_Y_TOP + 360; // below the main rail
-    let cursorX = 0;
+    // Resolve the effective position for a top-level step.
+    const resolveTopLevelPos = (step: Step, fallbackIdx: number) => {
+      if (step.position) return step.position;
+      return {
+        x: GRID_ORIGIN_X + fallbackIdx * GRID_COL_W,
+        y: NODE_Y_TOP,
+      };
+    };
 
-    // Start node
+    // Start node — pinned at the far left.
     nodes.push({
       id: START_ID,
       type: 'start',
-      position: { x: cursorX, y: NODE_Y_TOP },
+      position: { x: 0, y: NODE_Y_TOP },
       draggable: false,
       selectable: false,
       data: {
@@ -349,19 +344,20 @@ function FlowchartEditorInner({
         onDeleteInput: handleDeleteInput,
       } as StartNodeData,
     });
-    cursorX += 260 + CHILD_GAP;
 
-    // In-flow step nodes (top-level, on the exec rail)
-    inFlowSteps.forEach((step) => {
-      const size = renderStep(step, cursorX, NODE_Y_TOP, undefined);
-      cursorX += size.w + CHILD_GAP;
+    // Top-level step nodes at their own positions.
+    let maxRightEdge = 260 + CHILD_GAP;
+    topLevel.forEach((step, idx) => {
+      const pos = resolveTopLevelPos(step, idx);
+      const size = renderStep(step, pos.x, pos.y, undefined);
+      maxRightEdge = Math.max(maxRightEdge, pos.x + size.w + CHILD_GAP);
     });
 
-    // End node
+    // End node — pinned to the right of the rightmost step.
     nodes.push({
       id: END_ID,
       type: 'end',
-      position: { x: cursorX, y: NODE_Y_TOP },
+      position: { x: maxRightEdge, y: NODE_Y_TOP },
       draggable: false,
       selectable: false,
       data: {
@@ -374,42 +370,26 @@ function FlowchartEditorInner({
       } as EndNodeData,
     });
 
-    // Off-flow step nodes (free-area pure nodes). They render at their
-    // stored position; if no position is set yet (newly detached or
-    // freshly added), fall back to a tidy row below the rail.
-    let freeFallbackX = 0;
-    offFlowSteps.forEach((step) => {
-      const fallback = { x: freeFallbackX, y: FREE_AREA_Y };
-      const pos = step.position ?? fallback;
-      renderStep(step, pos.x, pos.y, undefined);
-      freeFallbackX += STEP_W + CHILD_GAP;
-    });
-
-    // Exec (control flow) edges: Start → in-flow step0 → ... → End.
-    // Use the dedicated "__exec__" handles which live at the top of
-    // each node, so they do NOT collide with the data-port handles
-    // inside the node body. Off-flow pure nodes are excluded.
-    const execChain: Array<{ id: string; sourceHandle: string; targetHandle: string }> = [
-      { id: START_ID, sourceHandle: '__exec__', targetHandle: '__exec__' },
-      ...inFlowSteps.map((s) => ({
-        id: s.id,
-        sourceHandle: '__exec__',
-        targetHandle: '__exec__',
-      })),
-      { id: END_ID, sourceHandle: '__exec__', targetHandle: '__exec__' },
+    // Exec (control flow) edges: Start → step0 → ... → End.
+    // The order is derived from `step.order`, which is kept in sync
+    // with the x coordinate on drag end. Uses the dedicated exec
+    // handles on top of each node so they do not collide with the
+    // data-port handles.
+    const execChain: string[] = [
+      START_ID,
+      ...topLevel.map((s) => s.id),
+      END_ID,
     ];
     for (let i = 0; i < execChain.length - 1; i++) {
-      const a = execChain[i];
-      const b = execChain[i + 1];
+      const aId = execChain[i];
+      const bId = execChain[i + 1];
       edges.push({
-        id: `exec-${a.id}-${b.id}`,
-        source: a.id,
-        sourceHandle: a.sourceHandle,
-        target: b.id,
-        targetHandle: b.targetHandle,
-        type: 'add',
+        id: `exec-${aId}-${bId}`,
+        source: aId,
+        sourceHandle: '__exec__',
+        target: bId,
+        targetHandle: '__exec__',
         style: { stroke: '#cbd5e1', strokeWidth: 3 },
-        data: { onAdd: () => handleOpenAdd(i) } as AddEdgeData,
       });
     }
 
@@ -470,7 +450,6 @@ function FlowchartEditorInner({
     handleUpdateOutput,
     handleRenameOutput,
     handleDeleteOutput,
-    handleOpenAdd,
     onRunStep,
     running,
   ]);
@@ -495,71 +474,32 @@ function FlowchartEditorInner({
       });
       onNodesChange(filtered);
 
-      // On drag end of a top-level step:
-      //  - If dropped above the free-area threshold: it belongs to the
-      //    exec rail. Reorder by x. If it was previously off-flow,
-      //    re-attach (clear position, set inFlow).
-      //  - If dropped below the threshold: it becomes a free-area pure
-      //    node. Persist position, mark inFlow=false. Containers are
-      //    forbidden from detaching (they ARE control flow).
+      // On drag end of a top-level step: persist the new free-form
+      // position AND recompute `order` from the x coordinate so that
+      // the exec chain (Start → ... → End) still reflects a sensible
+      // left-to-right reading of the graph.
       const dragEnds = filtered.filter(
         (c) => c.type === 'position' && !c.dragging && c.position,
       );
       if (dragEnds.length === 0) return;
 
-      // Threshold for "below the rail = free area".
-      // Rail Y is 100, step heights ~140-180, so anything below ~300
-      // is comfortably in the free zone.
-      const FREE_THRESHOLD_Y = 300;
-      const isContainerType = (t: Step['type']) =>
-        t === 'loop' || t === 'branch' || t === 'switch' || t === 'group';
-
-      // step.id → new x position (for in-flow nodes)
-      const newRailX = new Map<string, number>();
-      // step.id → new free-area position (for off-flow nodes)
-      const newFreePos = new Map<string, { x: number; y: number }>();
-      // step.id → new inFlow value (only for transitions)
-      const flowToggle = new Map<string, boolean>();
-      let touchedTopLevel = false;
-
+      const posUpdates = new Map<string, { x: number; y: number }>();
       for (const ch of dragEnds) {
         if (ch.type !== 'position' || !ch.position) continue;
         const step = block.steps.find((s) => s.id === ch.id);
-        if (!step || step.parentStepId) continue;
-        touchedTopLevel = true;
-
-        const wasInFlow = step.inFlow !== false;
-        const dropY = ch.position.y;
-
-        // Containers always stay on the rail.
-        if (isContainerType(step.type)) {
-          newRailX.set(step.id, ch.position.x);
-          if (!wasInFlow) flowToggle.set(step.id, true);
-          continue;
-        }
-
-        const goesToRail = dropY < FREE_THRESHOLD_Y;
-        if (goesToRail) {
-          newRailX.set(step.id, ch.position.x);
-          if (!wasInFlow) flowToggle.set(step.id, true);
-        } else {
-          newFreePos.set(step.id, ch.position);
-          if (wasInFlow) flowToggle.set(step.id, false);
-        }
+        if (!step || step.parentStepId) continue; // top-level only
+        posUpdates.set(step.id, ch.position);
       }
-      if (!touchedTopLevel) return;
+      if (posUpdates.size === 0) return;
 
-      // Recompute order for in-flow top-level steps based on effective x.
-      // Includes both currently in-flow steps and any newly attached.
+      // Recompute order: all top-level steps sorted by their effective
+      // x coordinate (dragged ones use the new x, others keep their
+      // stored/displayed position).
       const topLevelSteps = block.steps.filter((s) => !s.parentStepId);
-      const inFlowAfter = topLevelSteps.filter((s) => {
-        const toggled = flowToggle.get(s.id);
-        if (toggled !== undefined) return toggled;
-        return s.inFlow !== false;
-      });
-      const withX = inFlowAfter.map((s) => {
-        const draggedX = newRailX.get(s.id);
-        if (draggedX !== undefined) return { step: s, x: draggedX };
+      const withX = topLevelSteps.map((s) => {
+        const dragged = posUpdates.get(s.id);
+        if (dragged) return { step: s, x: dragged.x };
+        if (s.position) return { step: s, x: s.position.x };
         const node = rfNodes.find((n) => n.id === s.id);
         return { step: s, x: node?.position.x ?? s.order * 1000 };
       });
@@ -572,18 +512,7 @@ function FlowchartEditorInner({
           if (s.parentStepId) return s;
           const next: Step = { ...s };
           if (orderMap.has(s.id)) next.order = orderMap.get(s.id)!;
-          if (flowToggle.has(s.id)) {
-            const nowInFlow = flowToggle.get(s.id)!;
-            if (nowInFlow) {
-              next.inFlow = true;
-              next.position = undefined;
-            } else {
-              next.inFlow = false;
-            }
-          }
-          if (newFreePos.has(s.id)) {
-            next.position = newFreePos.get(s.id);
-          }
+          if (posUpdates.has(s.id)) next.position = posUpdates.get(s.id);
           return next;
         }),
       });
@@ -685,7 +614,6 @@ function FlowchartEditorInner({
           onEdgesChange={onEdgesChange}
           onConnect={handleConnect}
           nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}

@@ -32,10 +32,6 @@ export const StepNode = memo(function StepNode({
   const d = data as unknown as StepNodeData;
   const node = d.nodeManifest;
   const hasPorts = !!node && Object.keys(node.ports).length > 0;
-  // Pure (off-flow) nodes have no exec handles and render with a
-  // dashed muted border to signal they are evaluated for their data
-  // outputs only, not as part of the main control flow.
-  const isPure = d.step.inFlow === false;
 
   // Exec (control flow) handle styling — Bolt/Blueprint inspired.
   // Square white pegs at the top of the node, separate from the
@@ -51,17 +47,15 @@ export const StepNode = memo(function StepNode({
   };
 
   return (
-    <div className="relative" style={{ opacity: isPure ? 0.92 : 1 }}>
-      {/* Exec in (left) — control flow input. Hidden for pure nodes. */}
-      {!isPure && (
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="__exec__"
-          style={{ ...execStyle, left: -8 }}
-          title="exec in"
-        />
-      )}
+    <div className="relative">
+      {/* Exec in (left) — control flow input */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="__exec__"
+        style={{ ...execStyle, left: -8 }}
+        title="exec in"
+      />
 
       <FlowchartStepView
         step={d.step}
@@ -74,26 +68,14 @@ export const StepNode = memo(function StepNode({
         onRunStep={d.onRunStep}
       />
 
-      {/* Pure node badge */}
-      {isPure && (
-        <div
-          className="pointer-events-none absolute -top-2 left-2 rounded-sm bg-fl-bg px-1.5 py-px font-mono text-[8px] font-bold uppercase tracking-wider text-fl-text-faint"
-          style={{ border: '1px dashed var(--fl-border-strong)' }}
-        >
-          pure
-        </div>
-      )}
-
-      {/* Exec out (right) — control flow output. Hidden for pure nodes. */}
-      {!isPure && (
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="__exec__"
-          style={{ ...execStyle, right: -8 }}
-          title="exec out"
-        />
-      )}
+      {/* Exec out (right) — control flow output */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="__exec__"
+        style={{ ...execStyle, right: -8 }}
+        title="exec out"
+      />
 
       {/* Fallback default handles when the node has no port definitions. */}
       {!hasPorts && (
