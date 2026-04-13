@@ -706,13 +706,20 @@ export class Executor {
   /**
    * Order top-level steps by walking Block.execEdges from `__start__`.
    * Only steps reachable from Start are executed; unreachable steps
-   * (intentionally disconnected by the user) are skipped. Returns
-   * null when the block has no manual exec graph, so callers fall
-   * back to topoSortSteps (bindings-based).
+   * (intentionally disconnected by the user) are skipped.
+   *
+   * Semantics:
+   *   - execEdges === undefined  → return null so caller falls back
+   *                                 to bindings-based topoSortSteps
+   *                                 (legacy / un-edited blocks).
+   *   - execEdges === []         → user explicitly cleared all wires;
+   *                                 return [] so nothing executes.
+   *   - execEdges === [...]      → walk the graph from __start__.
    */
   private orderByExecGraph(block: Block, steps: Step[]): Step[] | null {
     const execEdges = block.execEdges;
-    if (!execEdges || execEdges.length === 0) return null;
+    if (execEdges === undefined) return null;
+    if (execEdges.length === 0) return [];
 
     const stepMap = new Map<string, Step>();
     for (const s of steps) stepMap.set(s.id, s);

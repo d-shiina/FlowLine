@@ -388,11 +388,13 @@ function FlowchartEditorInner({
 
     // Exec (control flow) edges — either manual from block.execEdges
     // or an auto linear fallback when no edges have been authored yet.
-    // The fallback now just chains Start → step0 → ... → stepN and
-    // stops at the last step (no End terminator).
+    // Semantics:
+    //   - undefined           : never edited → auto linear fallback
+    //   - []                  : explicitly empty (user cleared all wires) → render nothing
+    //   - [...]               : manual graph → render as-is
     const manualExecEdges = block.execEdges;
     const effectiveExecEdges: Array<{ from: string; to: string }> =
-      manualExecEdges && manualExecEdges.length > 0
+      manualExecEdges !== undefined
         ? manualExecEdges
         : topLevel.length > 0
           ? [
@@ -556,12 +558,13 @@ function FlowchartEditorInner({
     [onNodesChange, block.steps, rfNodes, onUpdateBlock],
   );
 
-  // Compute the current effective exec graph (manual if set,
-  // otherwise the auto linear chain Start → step[0] → ... → stepN).
+  // Compute the current effective exec graph.
+  //   - block.execEdges === undefined  → never edited → fallback linear chain
+  //   - block.execEdges === any array  → manual (incl. explicitly empty)
   // Used to "snapshot → manual" on the first exec-edge edit so
   // subsequent edits preserve intent.
   const getEffectiveExecEdges = useCallback((): Array<{ from: string; to: string }> => {
-    if (block.execEdges && block.execEdges.length > 0) return block.execEdges;
+    if (block.execEdges !== undefined) return block.execEdges;
     const top = block.steps
       .filter((s) => !s.parentStepId)
       .sort((a, b) => a.order - b.order);
@@ -672,6 +675,8 @@ function FlowchartEditorInner({
 
       // Exec handle drag → add a new exec edge to the graph.
       if (sourceHandle === '__exec__' && targetHandle === '__exec__') {
+        // Reject reverse wires into Start — it is the sole root.
+        if (target === START_ID) return;
         const current = getEffectiveExecEdges();
         const exists = current.some((e) => e.from === source && e.to === target);
         if (exists) return;
