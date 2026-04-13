@@ -517,8 +517,6 @@ export default function App() {
         onImport={handleImport}
         onExport={handleExport}
         onSample={() => setSamplesOpen(true)}
-        onOpenNodeEditor={() => setNodeEditorOpen(true)}
-        nodeCount={nodeManifest.length}
         theme={theme}
         onToggleTheme={toggleTheme}
       />

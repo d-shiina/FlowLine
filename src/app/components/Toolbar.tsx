@@ -1,7 +1,6 @@
 import {
   Play,
   Square,
-  Code2,
   Sun,
   Moon,
   FolderOpen,
@@ -18,15 +17,17 @@ interface Props {
   onImport: () => void;
   onExport: () => void;
   onSample: () => void;
-  onOpenNodeEditor: () => void;
-  nodeCount: number;
   theme: Theme;
   onToggleTheme: () => void;
 }
 
 /**
- * Main action toolbar: file ops, run, node editor, theme.
- * Python status moved to the StatusBar at the bottom (VSCode style).
+ * Main action toolbar.
+ * - Left: file operations (open / save / sample)
+ * - Center: run button (prominent)
+ * - Right: theme toggle
+ *
+ * Python status and node editor live in the bottom StatusBar.
  */
 export function Toolbar({
   playing,
@@ -34,19 +35,15 @@ export function Toolbar({
   onImport,
   onExport,
   onSample,
-  onOpenNodeEditor,
-  nodeCount,
   theme,
   onToggleTheme,
 }: Props) {
   const iconBtn =
     'flex h-7 items-center gap-1.5 rounded-md px-2.5 font-mono text-[10px] text-fl-text-faint transition-colors hover:bg-fl-panel-2 hover:text-fl-text';
 
-  const sep = <div className="mx-1 h-4 w-px bg-fl-border" />;
-
   return (
-    <div className="flex flex-shrink-0 items-center gap-1 border-b border-fl-border bg-fl-panel px-3 py-1.5">
-      {/* File ops */}
+    <div className="relative flex flex-shrink-0 items-center gap-1 border-b border-fl-border bg-fl-panel px-3 py-1.5">
+      {/* Left: file ops */}
       <button type="button" onClick={onImport} className={iconBtn} title="開く (Ctrl+O)">
         <FolderOpen className="h-3 w-3" /> 開く
       </button>
@@ -57,48 +54,36 @@ export function Toolbar({
         <BookOpen className="h-3 w-3" /> サンプル
       </button>
 
-      {sep}
+      {/* Center: run button (absolute, always centered) */}
+      <div className="pointer-events-none absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center">
+        <button
+          type="button"
+          onClick={onTogglePlay}
+          className="pointer-events-auto flex h-8 items-center gap-1.5 rounded-md border-[1.5px] px-5 font-mono text-[11px] font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-95"
+          style={{
+            borderColor: playing ? '#ef4444' : '#22c55e',
+            background: playing
+              ? 'linear-gradient(180deg, #ef444433 0%, #ef444422 100%)'
+              : 'linear-gradient(180deg, #22c55e33 0%, #22c55e22 100%)',
+            color: playing ? '#ef4444' : '#22c55e',
+            boxShadow: playing
+              ? '0 0 12px #ef444444'
+              : '0 0 12px #22c55e44',
+          }}
+        >
+          {playing ? (
+            <>
+              <Square className="h-3 w-3 fill-current" /> 停止
+            </>
+          ) : (
+            <>
+              <Play className="h-3 w-3 fill-current" /> 実行
+            </>
+          )}
+        </button>
+      </div>
 
-      {/* Run / stop — prominent */}
-      <button
-        type="button"
-        onClick={onTogglePlay}
-        className="flex h-7 items-center gap-1.5 rounded-md border px-3 font-mono text-[10px] font-bold transition-all"
-        style={{
-          borderColor: playing ? '#ef4444' : '#22c55e',
-          background: playing ? '#ef444422' : '#22c55e22',
-          color: playing ? '#ef4444' : '#22c55e',
-        }}
-      >
-        {playing ? (
-          <>
-            <Square className="h-3 w-3 fill-current" /> 停止
-          </>
-        ) : (
-          <>
-            <Play className="h-3 w-3 fill-current" /> 実行
-          </>
-        )}
-      </button>
-
-      {sep}
-
-      {/* Node editor */}
-      <button
-        type="button"
-        onClick={onOpenNodeEditor}
-        className={iconBtn}
-        title="Python ノードを編集 / 新規作成"
-      >
-        <Code2 className="h-3 w-3" /> ノード
-        {nodeCount > 0 && (
-          <span className="rounded bg-fl-border-strong px-1 font-mono text-[8px] text-fl-text-dim">
-            {nodeCount}
-          </span>
-        )}
-      </button>
-
-      {/* Right-aligned */}
+      {/* Right: theme */}
       <div className="ml-auto">
         <button
           type="button"
