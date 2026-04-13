@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import type { Block } from '../types';
 import type { BlockStatus } from '../engine';
@@ -34,12 +34,7 @@ export function TimelineBlock({
   onSlotChange,
 }: Props) {
   const [hov, setHov] = useState(false);
-  const [dragSlot, setDragSlot] = useState<number | null>(null);
-  const dragStateRef = useRef<{
-    startX: number;
-    originSlot: number;
-    moved: boolean;
-  } | null>(null);
+  const [dragPreviewSlot, setDragPreviewSlot] = useState<number | null>(null);
 
   const isRunning = status === 'running';
   const isError = status === 'error';
@@ -79,8 +74,8 @@ export function TimelineBlock({
         ? `0 0 0 1px ${accent}88`
         : 'none';
 
-  const effectiveSlot = dragSlot ?? block.slot;
-  const left = effectiveSlot * slotW + 6;
+  const displaySlot = dragPreviewSlot ?? block.slot;
+  const left = displaySlot * slotW + 6;
   const width = slotW - 12;
   const top = 8;
   const height = trackH - 16;
@@ -89,37 +84,61 @@ export function TimelineBlock({
   const hasInputs = block.inputs && Object.keys(block.inputs).length > 0;
   const hasOutputs = block.outputs && Object.keys(block.outputs).length > 0;
 
+  // Stable ref-based drag — avoids stale closure over dragPreviewSlot.
+  const dragInfoRef = useRef<{
+    startX: number;
+    originSlot: number;
+    moved: boolean;
+    currentSlot: number;
+  } | null>(null);
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
     onSelect();
-    dragStateRef.current = {
+
+    dragInfoRef.current = {
       startX: e.clientX,
       originSlot: block.slot,
       moved: false,
+      currentSlot: block.slot,
     };
 
     const onMove = (ev: MouseEvent) => {
-      const st = dragStateRef.current;
+      const st = dragInfoRef.current;
       if (!st) return;
       const dx = ev.clientX - st.startX;
       if (!st.moved && Math.abs(dx) < 4) return;
       st.moved = true;
       const slotDelta = Math.round(dx / slotW);
       const newSlot = Math.max(0, st.originSlot + slotDelta);
-      setDragSlot(newSlot);
+      st.currentSlot = newSlot;
+      setDragPreviewSlot(newSlot);
+    };
+
+    const swallowClick = (ev: MouseEvent) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      window.removeEventListener('click', swallowClick, true);
     };
 
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      const st = dragStateRef.current;
-      dragStateRef.current = null;
-      if (st?.moved && dragSlot !== null && dragSlot !== block.slot) {
-        onSlotChange(dragSlot);
+
+      const st = dragInfoRef.current;
+      dragInfoRef.current = null;
+      setDragPreviewSlot(null);
+
+      if (st && st.moved) {
+        // Prevent the upcoming click event from reaching the track
+        // canvas (which would open the add block modal).
+        window.addEventListener('click', swallowClick, true);
+        if (st.currentSlot !== st.originSlot) {
+          onSlotChange(st.currentSlot);
+        }
       }
-      setDragSlot(null);
     };
 
     window.addEventListener('mousemove', onMove);
@@ -138,11 +157,15 @@ export function TimelineBlock({
         background,
         boxShadow: shadow,
         opacity: isSkipped ? 0.5 : 1,
-        zIndex: selected || isRunning ? 10 : dragSlot !== null ? 20 : 1,
+        zIndex: dragPreviewSlot !== null ? 30 : selected || isRunning ? 10 : 1,
       }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       onMouseDown={handleMouseDown}
+      onClick={(e) => {
+        // Prevent canvas click (add modal) when clicking directly on a block.
+        e.stopPropagation();
+      }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         onOpen();
@@ -178,7 +201,6 @@ export function TimelineBlock({
         </div>
       </div>
 
-      {/* In/out indicator dots */}
       {hasInputs && (
         <span
           className="absolute left-0 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full"
@@ -194,7 +216,6 @@ export function TimelineBlock({
         />
       )}
 
-      {/* Step count badge */}
       {stepCount > 0 && !isRunning && !isOk && !isError && !isSkipped && (
         <span
           className="pointer-events-none absolute bottom-0.5 right-1 font-mono text-[7px] font-bold"
@@ -204,7 +225,6 @@ export function TimelineBlock({
         </span>
       )}
 
-      {/* Status indicator */}
       {(isRunning || isOk || isError || isSkipped) && (
         <span
           className="pointer-events-none absolute right-1 top-1 flex h-2.5 items-center justify-center rounded px-0.5 font-mono text-[7px] font-bold leading-none"
@@ -223,7 +243,6 @@ export function TimelineBlock({
         </span>
       )}
 
-      {/* Delete button on hover */}
       <button
         type="button"
         className="absolute right-0.5 top-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-red-500/80 text-[8px] text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
