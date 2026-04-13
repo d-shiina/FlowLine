@@ -5,8 +5,8 @@ import type { BlockStatus } from '../engine';
 import { TimelineBlock } from './TimelineBlock';
 
 // ── Layout constants ────────────────────────
-const SLOT_W = 110;
-const TRACK_H = 72;
+const SLOT_W = 150;
+const TRACK_H = 80;
 const RULER_H = 32;
 const LEFT_W = 168;
 const ERROR_SEPARATOR_H = 24;
@@ -19,6 +19,7 @@ interface Props {
   selectedBlockId: string | null;
   running: boolean;
   currentSlotByTrack: Record<string, number | undefined>;
+  scenarioVariables: Record<string, unknown>;
   onSelectBlock: (trackId: string, blockId: string) => void;
   onOpenBlock: (trackId: string, blockId: string) => void;
   onUpdateBlock: (trackId: string, blockId: string, patch: Partial<Block>) => void;
@@ -51,6 +52,7 @@ export function Timeline({
   blockStatus,
   selectedBlockId,
   currentSlotByTrack,
+  scenarioVariables,
   onSelectBlock,
   onOpenBlock,
   onUpdateBlock,
@@ -134,11 +136,18 @@ export function Timeline({
                     selected={selectedBlockId === block.id}
                     slotW={SLOT_W}
                     trackH={TRACK_H}
+                    scenarioVariables={scenarioVariables}
                     onSelect={() => onSelectBlock(track.id, block.id)}
                     onOpen={() => onOpenBlock(track.id, block.id)}
                     onDelete={() => onDeleteBlock(track.id, block.id)}
                     onSlotChange={(newSlot) =>
                       onUpdateBlock(track.id, block.id, { slot: newSlot })
+                    }
+                    onUpdateInputs={(inputs) =>
+                      onUpdateBlock(track.id, block.id, { inputs })
+                    }
+                    onUpdateOutputs={(outputs) =>
+                      onUpdateBlock(track.id, block.id, { outputs })
                     }
                   />
                 ))}
@@ -217,6 +226,7 @@ export function Timeline({
               selected={selectedBlockId === block.id}
               slotW={SLOT_W}
               trackH={TRACK_H}
+              scenarioVariables={scenarioVariables}
               onSelect={() => onSelectBlock(scenario.errorHandler.id, block.id)}
               onOpen={() =>
                 onOpenBlock(scenario.errorHandler.id, block.id)
@@ -228,6 +238,12 @@ export function Timeline({
                 onUpdateBlock(scenario.errorHandler.id, block.id, {
                   slot: newSlot,
                 })
+              }
+              onUpdateInputs={(inputs) =>
+                onUpdateBlock(scenario.errorHandler.id, block.id, { inputs })
+              }
+              onUpdateOutputs={(outputs) =>
+                onUpdateBlock(scenario.errorHandler.id, block.id, { outputs })
               }
             />
           ))}

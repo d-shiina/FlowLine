@@ -627,6 +627,7 @@ export default function App() {
               selectedBlockId={selected?.blockId ?? null}
               running={playing}
               currentSlotByTrack={execution.state.currentSlot}
+              scenarioVariables={scenario.variables.scenario}
               onSelectBlock={(tid, bid) => handleBlockClick(tid, bid)}
               onOpenBlock={(tid, bid) =>
                 setEditingBlock({ trackId: tid, blockId: bid })

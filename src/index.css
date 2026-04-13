@@ -3,14 +3,9 @@
 /*
  * FLOWLINE theme tokens.
  *
- * Semantic tokens live on :root (dark default) and [data-theme="light"]
- * (light override). The @theme directive re-exports them as Tailwind
- * utility tokens (bg-fl-bg, text-fl-text, etc.), which means switching
- * the data-theme attribute on <html> swaps the whole theme at runtime
- * with no JS re-render required.
- *
- * Accent colors and block-type colors are fixed across themes — they're
- * semantic (action=blue, loop=purple, etc.) and work on both backdrops.
+ * Two carefully-tuned palettes (dark + light) with a cohesive
+ * accent color scheme. Inspired by modern editors (Linear, Arc,
+ * Vercel) rather than the usual slate/gray mud.
  */
 
 @theme {
@@ -32,58 +27,64 @@
   --color-fl-error-panel: var(--fl-error-panel);
   --color-fl-error-canvas: var(--fl-error-canvas);
 
-  /* Fixed accents */
-  --color-fl-accent: #3b82f6;
-  --color-fl-link: #60a5fa;
-  --color-fl-play: #22c55e;
-  --color-fl-error: #f43f5e;
-  --color-fl-warn: #eab308;
+  /* Semantic accents — richer, more distinctive than flat tailwind */
+  --color-fl-accent: #6366f1;      /* indigo */
+  --color-fl-link: #818cf8;
+  --color-fl-play: #10b981;        /* emerald */
+  --color-fl-error: #f43f5e;       /* rose */
+  --color-fl-warn: #f59e0b;        /* amber */
+  --color-fl-start: #14b8a6;       /* teal */
+  --color-fl-end: #a855f7;         /* purple */
 
-  /* Block type colors (fixed) */
-  --color-fl-action: #3b82f6;
+  /* Block type colors */
+  --color-fl-action: #6366f1;
   --color-fl-wait: #06b6d4;
   --color-fl-loop: #8b5cf6;
   --color-fl-branch: #f59e0b;
   --color-fl-sub: #94a3b8;
 }
 
+/* ─────── Dark theme ─────── */
+/* Deep navy base with subtle warmth — Linear-inspired, less gray than slate */
 :root,
 [data-theme='dark'] {
-  /* SlateGray palette — neutral gray with a faint cool undertone,
-     deliberately lower in blue saturation than Tailwind's default
-     slate (which reads quite blue). Inspired by the CSS named
-     color SlateGray (#708090). */
-  --fl-bg: #1a1d24;
-  --fl-panel: #252932;
-  --fl-panel-2: #31363f;
-  --fl-modal: #31363f;
-  --fl-border: #31363f;
-  --fl-border-2: #3e4450;
-  --fl-border-strong: #525763;
-  --fl-text: #e8eaee;
-  --fl-text-muted: #cfd2d8;
-  --fl-text-dim: #9ba0a9;
-  --fl-text-faint: #70757e;
-  --fl-text-ghost: #4a4f58;
-  --fl-error-panel: #2a1618;
-  --fl-error-canvas: #1e1012;
+  --fl-bg: #0b0d12;
+  --fl-panel: #12151c;
+  --fl-panel-2: #1a1e27;
+  --fl-modal: #1a1e27;
+  --fl-border: #252a35;
+  --fl-border-2: #2f3542;
+  --fl-border-strong: #454d5e;
+  --fl-text: #eaecf2;
+  --fl-text-muted: #c8ccd6;
+  --fl-text-dim: #8d95a6;
+  --fl-text-faint: #5c6373;
+  --fl-text-ghost: #3a4050;
+  --fl-error-panel: #25131a;
+  --fl-error-canvas: #1a0c11;
+
+  color-scheme: dark;
 }
 
+/* ─────── Light theme ─────── */
+/* Warm off-white with cool text — Notion/Linear inspired */
 [data-theme='light'] {
-  --fl-bg: #f5f6f8;
+  --fl-bg: #fafbfc;
   --fl-panel: #ffffff;
-  --fl-panel-2: #eceef2;
+  --fl-panel-2: #f4f5f8;
   --fl-modal: #ffffff;
-  --fl-border: #dfe2e8;
-  --fl-border-2: #c7cbd3;
-  --fl-border-strong: #8d93a0;
-  --fl-text: #1a1d24;
-  --fl-text-muted: #2c3039;
-  --fl-text-dim: #545a65;
-  --fl-text-faint: #70757e;
-  --fl-text-ghost: #c7cbd3;
-  --fl-error-panel: #fef2f2;
-  --fl-error-canvas: #fff7f7;
+  --fl-border: #e6e8ee;
+  --fl-border-2: #d1d5de;
+  --fl-border-strong: #9ca3b0;
+  --fl-text: #0f172a;
+  --fl-text-muted: #1e293b;
+  --fl-text-dim: #475569;
+  --fl-text-faint: #94a3b8;
+  --fl-text-ghost: #cbd5e1;
+  --fl-error-panel: #fef1f3;
+  --fl-error-canvas: #fef7f8;
+
+  color-scheme: light;
 }
 
 html,
@@ -99,6 +100,7 @@ body {
   color: var(--fl-text);
   font-family: var(--font-mono);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 .fl-scroll::-webkit-scrollbar {
@@ -106,17 +108,26 @@ body {
   width: 10px;
 }
 .fl-scroll::-webkit-scrollbar-track {
-  background: var(--fl-panel);
+  background: transparent;
 }
 .fl-scroll::-webkit-scrollbar-thumb {
   background: var(--fl-border-2);
   border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 .fl-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--fl-border-strong);
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 @keyframes flowline-pulse {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
+}
+
+@keyframes flowline-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }

@@ -22,8 +22,8 @@ export interface EndNodeData {
   [key: string]: unknown;
 }
 
-const START_COLOR = '#22c55e';
-const END_COLOR = '#f43f5e';
+const START_COLOR = '#14b8a6'; // teal
+const END_COLOR = '#a855f7';   // purple
 
 // ── Start Node ───────────────────────────────
 
