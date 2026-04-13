@@ -230,7 +230,8 @@ function FlowchartEditorInner({
     };
 
     // Recursively render a step (and its children, if container).
-    // Returns the size used.
+    // Returns the size used. If step.position is set, that overrides
+    // the auto-computed (x, y).
     const renderStep = (
       step: Step,
       x: number,
@@ -243,13 +244,14 @@ function FlowchartEditorInner({
         step.type === 'switch' ||
         step.type === 'group';
       const size = measure(step);
+      const pos = step.position ?? { x, y };
 
       if (isContainer) {
         const kids = childrenOf(step.id);
         nodes.push({
           id: step.id,
           type: 'container',
-          position: { x, y },
+          position: pos,
           parentId,
           extent: parentId ? 'parent' : undefined,
           dragHandle: '.drag-handle',
@@ -295,7 +297,7 @@ function FlowchartEditorInner({
         nodes.push({
           id: step.id,
           type: 'step',
-          position: { x, y },
+          position: pos,
           parentId,
           extent: parentId ? 'parent' : undefined,
           dragHandle: '.drag-handle',
@@ -456,38 +458,29 @@ function FlowchartEditorInner({
       });
       onNodesChange(filtered);
 
-      // On drag end: reorder steps by x position.
-      const dragEnd = filtered.find(
-        (c) => c.type === 'position' && !c.dragging,
+      // On drag end: persist new positions to step.position so the
+      // user's manual layout sticks across re-renders. Topological
+      // execution order is independent of visual position.
+      const dragEnds = filtered.filter(
+        (c) => c.type === 'position' && !c.dragging && c.position,
       );
-      if (dragEnd) {
-        // Only reorder TOP-LEVEL nodes (no parentId). Container children
-        // are positioned by the layout algorithm and shouldn't drag-reorder.
-        const stepNodes = nodes.filter(
-          (n) => n.id !== START_ID && n.id !== END_ID && !n.parentId,
-        );
-        const updated = stepNodes.map((n) => {
-          const ch = filtered.find(
-            (c) => c.type === 'position' && c.id === n.id,
-          );
-          if (ch && ch.type === 'position' && ch.position) {
-            return { ...n, position: ch.position };
+      if (dragEnds.length > 0) {
+        const positionUpdates = new Map<string, { x: number; y: number }>();
+        for (const ch of dragEnds) {
+          if (ch.type === 'position' && ch.position) {
+            positionUpdates.set(ch.id, ch.position);
           }
-          return n;
-        });
-        updated.sort((a, b) => a.position.x - b.position.x);
-        const orderMap = new Map<string, number>();
-        updated.forEach((n, i) => orderMap.set(n.id, i));
+        }
         onUpdateBlock({
           steps: block.steps.map((s) =>
-            !s.parentStepId && orderMap.has(s.id)
-              ? { ...s, order: orderMap.get(s.id)! }
+            positionUpdates.has(s.id)
+              ? { ...s, position: positionUpdates.get(s.id)! }
               : s,
           ),
         });
       }
     },
-    [onNodesChange, nodes, block.steps, onUpdateBlock],
+    [onNodesChange, block.steps, onUpdateBlock],
   );
 
   // ── Port-to-port connection (data flow) ───

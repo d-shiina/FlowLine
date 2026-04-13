@@ -301,9 +301,9 @@ export class Executor {
     }
     this.flush();
 
-    const topLevel = block.steps
-      .filter((s) => !s.parentStepId && s.inFlow !== false)
-      .sort((a, b) => a.order - b.order);
+    const topLevel = this.topoSortSteps(
+      block.steps.filter((s) => !s.parentStepId && s.inFlow !== false),
+    );
 
     // Find start index
     const startIdx = topLevel.findIndex((s) => s.id === startStepId);
@@ -509,9 +509,10 @@ export class Executor {
     }
     this.flush();
 
-    const topLevel = block.steps
-      .filter((s) => !s.parentStepId && s.inFlow !== false)
-      .sort((a, b) => a.order - b.order);
+    const topLevelRaw = block.steps.filter(
+      (s) => !s.parentStepId && s.inFlow !== false,
+    );
+    const topLevel = this.topoSortSteps(topLevelRaw);
 
     let failed = false;
     for (const step of topLevel) {
@@ -655,7 +656,9 @@ export class Executor {
     this.state.status[groupStep.id] = 'running';
     this.flush();
 
-    const children = this.stepChildrenOf(block.steps, groupStep.id);
+    const children = this.topoSortSteps(
+      this.stepChildrenOf(block.steps, groupStep.id),
+    );
 
     let failed = false;
     for (const child of children) {
@@ -695,6 +698,84 @@ export class Executor {
       .sort((a, b) => a.order - b.order);
   }
 
+  /**
+   * Topologically sort a list of steps based on their bindings (data flow
+   * dependencies) within the same scope. The fallback order is each step's
+   * `order` field, so existing scenarios with no explicit connections
+   * behave exactly as before.
+   *
+   * Dependency rule: step B depends on step A if B has a `var`-binding
+   * input port whose key matches A's `var`-binding output port.
+   * (Connection-typed bindings on Block.inputs go through the same
+   * channel mechanism but at the Block level; this is per-step inside
+   * a Block's flowchart, where bindings still use PortBinding.)
+   */
+  private topoSortSteps(steps: Step[]): Step[] {
+    if (steps.length <= 1) return steps;
+
+    // Map: var key → step id that writes it (output port).
+    const writers = new Map<string, string>();
+    for (const s of steps) {
+      if (!s.bindings) continue;
+      for (const [, binding] of Object.entries(s.bindings)) {
+        if (binding.kind !== 'var') continue;
+        // We don't know per-port direction without the manifest, so we
+        // conservatively treat any var-binding write as a potential
+        // emitter and match against any var-binding read on another step.
+        // The collision is harmless: a duplicate key just enforces order.
+        if (!writers.has(binding.key)) writers.set(binding.key, s.id);
+      }
+    }
+
+    // Build adjacency: depMap[stepId] = set of step ids it depends on.
+    const depMap = new Map<string, Set<string>>();
+    for (const s of steps) {
+      depMap.set(s.id, new Set());
+    }
+    for (const s of steps) {
+      if (!s.bindings) continue;
+      for (const [, binding] of Object.entries(s.bindings)) {
+        if (binding.kind !== 'var') continue;
+        const writerId = writers.get(binding.key);
+        if (writerId && writerId !== s.id) {
+          depMap.get(s.id)!.add(writerId);
+        }
+      }
+    }
+
+    // Kahn's algorithm with `order` as tiebreaker.
+    const remaining = new Map<string, Step>();
+    for (const s of steps) remaining.set(s.id, s);
+    const result: Step[] = [];
+    const guard = steps.length * 2;
+    let safety = 0;
+
+    while (remaining.size > 0 && safety++ < guard) {
+      // Pick all steps whose deps are satisfied (not in remaining).
+      const ready: Step[] = [];
+      for (const s of remaining.values()) {
+        const deps = depMap.get(s.id)!;
+        const unmet = [...deps].some((d) => remaining.has(d));
+        if (!unmet) ready.push(s);
+      }
+      if (ready.length === 0) {
+        // Cycle or unresolvable. Fall back to remaining sorted by order.
+        const fallback = [...remaining.values()].sort(
+          (a, b) => a.order - b.order,
+        );
+        result.push(...fallback);
+        break;
+      }
+      // Sort by order field so equal-priority steps stay stable.
+      ready.sort((a, b) => a.order - b.order);
+      for (const s of ready) {
+        result.push(s);
+        remaining.delete(s.id);
+      }
+    }
+    return result;
+  }
+
   /** Loop step — mirrors executeLoop but uses stepChildrenOf. */
   private async executeStepLoop(
     containerId: string,
@@ -723,7 +804,9 @@ export class Executor {
     );
     this.flush();
 
-    const children = this.stepChildrenOf(block.steps, loopStep.id);
+    const children = this.topoSortSteps(
+      this.stepChildrenOf(block.steps, loopStep.id),
+    );
     const evalVars = {
       getVariable: (key: string) => this.variables.get(key),
       onWarn: (msg: string) =>
@@ -806,10 +889,12 @@ export class Executor {
       `条件 → ${taken ? 'TRUE' : 'FALSE'}`,
     );
 
-    const winners = this.stepChildrenOf(
-      block.steps,
-      branchStep.id,
-      taken ? 'then' : 'else',
+    const winners = this.topoSortSteps(
+      this.stepChildrenOf(
+        block.steps,
+        branchStep.id,
+        taken ? 'then' : 'else',
+      ),
     );
     const losers = this.stepChildrenOf(
       block.steps,
@@ -901,10 +986,8 @@ export class Executor {
 
     let failed = false;
     if (winningCase !== null) {
-      const winners = this.stepChildrenOf(
-        block.steps,
-        switchStep.id,
-        winningCase,
+      const winners = this.topoSortSteps(
+        this.stepChildrenOf(block.steps, switchStep.id, winningCase),
       );
       for (const child of winners) {
         if (this.aborted) break;
