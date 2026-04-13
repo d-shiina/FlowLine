@@ -37,7 +37,7 @@ type EditorMode =
 export default function App() {
   const store = useScenario();
   const { scenario } = store;
-  const tabsStore = useScenarioTabs(scenario);
+  const tabsStore = useScenarioTabs();
   const recent = useRecentScenarios();
   const { theme, toggle: toggleTheme } = useTheme();
 

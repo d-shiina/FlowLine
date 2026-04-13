@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Scenario } from './types';
-import { cloneSample, DEFAULT_SAMPLE } from './samples';
+import { ERROR_HANDLER_COLOR, ERROR_HANDLER_ID, TRACK_COLORS } from './types';
 
 /**
  * Per-tab metadata. Scenario tabs hold a full scenario snapshot; the
@@ -33,8 +33,28 @@ function makeTabId(): string {
 }
 
 function emptyScenario(name = '新規シナリオ'): Scenario {
-  const base = cloneSample(DEFAULT_SAMPLE);
-  return { ...base, name };
+  const tid = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  return {
+    version: '1.0',
+    name,
+    variables: { scenario: {} },
+    tracks: [
+      {
+        id: tid,
+        name: 'トラック1',
+        color: TRACK_COLORS[0],
+        blocks: [],
+      },
+    ],
+    syncPoints: [],
+    errorHandler: {
+      id: ERROR_HANDLER_ID,
+      name: 'エラー処理',
+      color: ERROR_HANDLER_COLOR,
+      blocks: [],
+    },
+    subroutines: [],
+  };
 }
 
 function welcomeTab(): ScenarioTab {
@@ -45,17 +65,12 @@ function welcomeTab(): ScenarioTab {
   };
 }
 
-export function useScenarioTabs(
-  initialScenario: Scenario,
-): UseScenarioTabs {
-  // Start with just the welcome tab; the initialScenario is stashed
-  // so the first "new scenario" action can reuse it as the starting state.
+export function useScenarioTabs(): UseScenarioTabs {
+  // Start with just the welcome tab.
   const [tabs, setTabs] = useState<ScenarioTab[]>(() => [welcomeTab()]);
   const [activeId, setActiveId] = useState<string>(WELCOME_TAB_ID);
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
-
-  const initialRef = useRef<Scenario | null>(initialScenario);
 
   const activeTab = tabs.find((t) => t.id === activeId);
 
@@ -83,8 +98,7 @@ export function useScenarioTabs(
 
   const openTab = useCallback(
     (scenario?: Scenario, title?: string): Scenario => {
-      const s = scenario ?? initialRef.current ?? emptyScenario();
-      initialRef.current = null;
+      const s = scenario ?? emptyScenario();
       const tab: ScenarioTab = {
         id: makeTabId(),
         kind: 'scenario',
